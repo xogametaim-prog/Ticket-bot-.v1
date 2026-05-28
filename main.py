@@ -12,7 +12,7 @@ import threading
 from flask import Flask
 from datetime import datetime
 
-# ========== خادم ويب لـ Render ==========
+# ========== Flask لـ Render ==========
 تطبيق_فلاسك = Flask(__name__)
 
 @تطبيق_فلاسك.route('/')
@@ -41,9 +41,9 @@ if التوكن is None:
 مكافأة_ساعية_عملات = 100
 الحد_الأدنى_للعمل = 50
 الحد_الأقصى_للعمل = 200
-مدة_السرقة = 600  # 10 دقائق
-نسبة_السرقة = 0.2  # 20%
-مدة_التخفي = 1800  # 30 دقيقة
+مدة_السرقة = 600
+نسبة_السرقة = 0.2
+مدة_التخفي = 1800
 الحد_الأقصى_لاسم_الفريق = 20
 ثواني_اليوم = 86400
 ثواني_الساعة = 3600
@@ -108,7 +108,6 @@ async def تهيئة_قاعدة_البيانات():
             اخر_تصفير INTEGER
         )''')
         
-        # تعبئة المتجر العادي
         المؤشر = await قاعدة.execute("SELECT COUNT(*) FROM المتجر")
         if (await المؤشر.fetchone())[0] == 0:
             العناصر = [
@@ -141,7 +140,6 @@ async def تهيئة_قاعدة_البيانات():
             ]
             await قاعدة.executemany("INSERT INTO المتجر VALUES (?,?,?,?,?)", العناصر)
         
-        # تعبئة السوق السوداء (50 سلعة)
         المؤشر = await قاعدة.execute("SELECT COUNT(*) FROM السوق_السوداء")
         if (await المؤشر.fetchone())[0] == 0:
             عناصر_سوداء = []
@@ -276,3 +274,48 @@ async def ارسال_تسجيل(البوت, العنوان, الوصف, اللو
         if القناة:
             تضمين = discord.Embed(title=العنوان, description=الوصف, color=اللون, timestamp=datetime.now())
             await القناة.send(embed=تضمين)
+
+# ========== إعداد البوت ==========
+الصلاحيات = discord.Intents.default()
+الصلاحيات.message_content = True
+الصلاحيات.members = True
+
+البوت = commands.Bot(command_prefix="!", intents=الصلاحيات)
+
+# ========== كلاس مخصص للسوق السوداء ==========
+class السوق_السوداء_View(discord.ui.View):
+    def __init__(self, الصفحة_الحالية: int = 1):
+        super().__init__(timeout=120)
+        self.الصفحة_الحالية = الصفحة_الحالية
+        self.تحديث_الأزرار()
+    
+    def تحديث_الأزرار(self):
+        self.clear_items()
+        زر_السابق = discord.ui.Button(label="◀ السابقة", style=discord.ButtonStyle.secondary, custom_id="prev")
+        زر_التالي = discord.ui.Button(label="التالي ▶", style=discord.ButtonStyle.secondary, custom_id="next")
+        زر_السابق.callback = self.السابق_callback
+        زر_التالي.callback = self.التالي_callback
+        self.add_item(زر_السابق)
+        self.add_item(زر_التالي)
+    
+    async def السابق_callback(self, التفاعل: discord.Interaction):
+        if self.الصفحة_الحالية > 1:
+            self.الصفحة_الحالية -= 1
+            العناصر = await احصل_على_سلع_السوق_السوداء(self.الصفحة_الحالية)
+            تضمين = discord.Embed(title=f"🔫 السوق السوداء - الصفحة {self.الصفحة_الحالية}/5", color=0xFF0000)
+            for عنصر in العناصر:
+                تضمين.add_field(name=f"{عنصر['id']}. {عنصر['name']}", value=f"🪙 {عنصر['coinPrice']} | 💎 {عنصر['creditPrice']}", inline=True)
+            await التفاعل.response.edit_message(embed=تضمين, view=self)
+        else:
+            await التفاعل.response.send_message("أنت في الصفحة الأولى", ephemeral=True)
+    
+    async def التالي_callback(self, التفاعل: discord.Interaction):
+        if self.الصفحة_الحالية < 5:
+            self.الصفحة_الحالية += 1
+            العناصر = await احصل_على_سلع_السوق_السوداء(self.الصفحة_الحالية)
+            تضمين = discord.Embed(title=f"🔫 السوق السوداء - الصفحة {self.الصفحة_الحالية}/5", color=0xFF0000)
+            for عنصر in العناصر:
+                تضمين.add_field(name=f"{عنصر['id']}. {عنصر['name']}", value=f"🪙 {عنصر['coinPrice']} | 💎 {عنصر['creditPrice']}", inline=True)
+            await التفاعل.response.edit_message(embed=تضمين, view=self)
+        else:
+            await التفاعل.response.send_message("أنت في الصفحة الخامسة", ephemeral=True)
