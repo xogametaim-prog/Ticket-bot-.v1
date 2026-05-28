@@ -299,3 +299,51 @@ async def ارسال_تسجيل(البوت, العنوان, الوصف, اللو
 الصلاحيات.members = True
 
 البوت = commands.Bot(command_prefix="!", intents=الصلاحيات)
+# ========== كلاس مخصص للسوق السوداء ==========
+class السوق_السوداء_View(discord.ui.View):
+    def __init__(self, الصفحة_الحالية: int = 1):
+        super().__init__(timeout=120)
+        self.الصفحة_الحالية = الصفحة_الحالية
+
+    @discord.ui.button(label="◀ السابقة", style=discord.ButtonStyle.secondary)
+    async def السابق_callback(self, التفاعل: discord.Interaction):
+        if self.الصفحة_الحالية > 1:
+            self.الصفحة_الحالية -= 1
+            العناصر = await احصل_على_سلع_السوق_السوداء(self.الصفحة_الحالية)
+            تضمين = discord.Embed(title=f"🔫 السوق السوداء - الصفحة {self.الصفحة_الحالية}/5", color=0xFF0000)
+            for عنصر in العناصر:
+                تضمين.add_field(
+                    name=f"{عنصر['id']}. {عنصر['name']}", 
+                    value=f"🪙 {عنصر['coinPrice']} عملة\n💎 {عنصر['creditPrice']} رصيد\n📝 *{عنصر['desc']}*", 
+                    inline=True
+                )
+            await التفاعل.response.edit_message(embed=تضمين, view=self)
+        else:
+            await التفاعل.response.send_message("❌ أنت في الصفحة الأولى بالفعل!", ephemeral=True)
+    
+    @discord.ui.button(label="التالي ▶", style=discord.ButtonStyle.secondary)
+    async def التالي_callback(self, التفاعل: discord.Interaction):
+        if self.الصفحة_الحالية < 5:
+            self.الصفحة_الحالية += 1
+            العناصر = await احصل_على_سلع_السوق_السوداء(self.الصفحة_الحالية)
+            تضمين = discord.Embed(title=f"🔫 السوق السوداء - الصفحة {self.الصفحة_الحالية}/5", color=0xFF0000)
+            for عنصر in العناصر:
+                تضمين.add_field(
+                    name=f"{عنصر['id']}. {عنصر['name']}", 
+                    value=f"🪙 {عنصر['coinPrice']} عملة\n💎 {عنصر['creditPrice']} رصيد\n📝 *{عنصر['desc']}*", 
+                    inline=True
+                )
+            await التفاعل.response.edit_message(embed=تضمين, view=self)
+        else:
+            await التفاعل.response.send_message("❌ أنت في الصفحة الأخيرة (الخامسة) بالفعل!", ephemeral=True)
+
+# ========== أحداث التشغيل والتزامن ==========
+@البوت.event
+async def on_ready():
+    print(f"✅ تم تشغيل البوت بنجاح باسم: {البوت.user}")
+    await تهيئة_قاعدة_البيانات()
+    try:
+        المزامنة = await البوت.tree.sync()
+        print(f"🔄 تم مزامنة {len(المزامنة)} من الأوامر المائلة Slash Commands!")
+    except Exception as e:
+        print(f"❌ فشل مزامنة الأوامر المائلة: {e}")
