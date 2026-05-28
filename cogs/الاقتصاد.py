@@ -16,56 +16,55 @@ class الاقتصاد(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="رصيدي", description="عرض رصيدك من العملات والرصيد المميز")
+    @app_commands.command(name="رصيدي", description="عرض رصيدك")
     async def رصيدي(self, interaction: discord.Interaction):
         بيانات = await احصل_على_مستخدم(str(interaction.user.id))
         تضمين = discord.Embed(title=f"محفظة {interaction.user.display_name}", color=0x00AE86)
         تضمين.add_field(name="🪙 العملات", value=بيانات["coins"], inline=True)
         تضمين.add_field(name="💎 الرصيد المميز", value=بيانات["credits"], inline=True)
-        تضمين.set_footer(text="اشتري من /المتجر | الرصيد المميز يعطي ضعف الكمية")
         await interaction.response.send_message(embed=تضمين)
 
-    @app_commands.command(name="يومي", description="احصل على مكافأتك اليومية (مرة كل 24 ساعة)")
+    @app_commands.command(name="يومي", description="مكافأة يومية")
     async def يومي(self, interaction: discord.Interaction):
         uid = str(interaction.user.id)
         بيانات = await احصل_على_مستخدم(uid)
         الآن = int(time.time())
         if الآن - بيانات["last_daily"] < ثواني_اليوم:
             باقي = ثواني_اليوم - (الآن - بيانات["last_daily"])
-            ساعات = باقي // 3600
-            دقائق = (باقي % 3600) // 60
-            await interaction.response.send_message(f"⏳ لقد حصلت على مكافأتك اليومية بالفعل! انتظر {ساعات} ساعة و {دقائق} دقيقة.", ephemeral=True)
+            س = باقي // 3600
+            د = (باقي % 3600) // 60
+            await interaction.response.send_message(f"⏳ انتظر {س} ساعة {د} دقيقة", ephemeral=True)
             return
         await تحديث_مستخدم(uid, last_daily=الآن, coins=بيانات["coins"]+مكافأة_يومية_عملات, credits=بيانات["credits"]+مكافأة_يومية_رصيد)
-        await interaction.response.send_message(f"🎁 مكافأة يومية: +{مكافأة_يومية_عملات} عملة و +{مكافأة_يومية_رصيد} رصيد مميز")
+        await interaction.response.send_message(f"🎁 +{مكافأة_يومية_عملات} عملة و +{مكافأة_يومية_رصيد} رصيد")
 
-    @app_commands.command(name="ساعي", description="احصل على مكافأة كل ساعة")
+    @app_commands.command(name="ساعي", description="مكافأة كل ساعة")
     async def ساعي(self, interaction: discord.Interaction):
         uid = str(interaction.user.id)
         بيانات = await احصل_على_مستخدم(uid)
         الآن = int(time.time())
         if الآن - بيانات["last_hourly"] < ثواني_الساعة:
             باقي = ثواني_الساعة - (الآن - بيانات["last_hourly"])
-            دقائق = باقي // 60
-            await interaction.response.send_message(f"⏳ يمكنك الحصول على المكافأة الساعية بعد {دقائق} دقيقة.", ephemeral=True)
+            د = باقي // 60
+            await interaction.response.send_message(f"⏳ انتظر {د} دقيقة", ephemeral=True)
             return
         await تحديث_مستخدم(uid, last_hourly=الآن, coins=بيانات["coins"]+مكافأة_ساعية_عملات)
-        await interaction.response.send_message(f"⏲️ مكافأة ساعية: +{مكافأة_ساعية_عملات} عملة")
+        await interaction.response.send_message(f"⏲️ +{مكافأة_ساعية_عملات} عملة")
 
-    @app_commands.command(name="اعمل", description="اعمل لكسب عملات إضافية")
+    @app_commands.command(name="اعمل", description="اعمل لكسب عملات")
     async def اعمل(self, interaction: discord.Interaction):
         earnings = random.randint(الحد_الأدنى_للعمل, الحد_الأقصى_للعمل)
         uid = str(interaction.user.id)
         بيانات = await احصل_على_مستخدم(uid)
         await تحديث_مستخدم(uid, coins=بيانات["coins"]+earnings)
-        await interaction.response.send_message(f"💼 لقد عملت بجد وكسبت {earnings} عملة")
+        await interaction.response.send_message(f"💼 كسبت {earnings} عملة")
 
-    @app_commands.command(name="الاغنياء", description="عرض أغنى 10 لاعبين")
+    @app_commands.command(name="الاغنياء", description="أغنى 10 لاعبين")
     async def الاغنياء(self, interaction: discord.Interaction):
         rows = await احصل_على_كل_المستخدمين_للترتيب()
         مرتبة = sorted(rows, key=lambda x: x[1], reverse=True)[:10]
         if not مرتبة:
-            await interaction.response.send_message("لا يوجد مستخدمون بعد.")
+            await interaction.response.send_message("لا يوجد مستخدمون")
             return
         الوصف = ""
         for i, (uid, عملات) in enumerate(مرتبة):
@@ -75,16 +74,15 @@ class الاقتصاد(commands.Cog):
         تضمين = discord.Embed(title="🏆 قائمة الأغنياء", description=الوصف, color=0xFFD700)
         await interaction.response.send_message(embed=تضمين)
 
-    @app_commands.command(name="المتجر", description="عرض جميع السلع (25 سلعة)")
+    @app_commands.command(name="المتجر", description="عرض 25 سلعة")
     async def المتجر(self, interaction: discord.Interaction):
         السلع = await احصل_على_كل_سلع_المتجر()
-        تضمين = discord.Embed(title="🛒 المتجر", description="استخدم `/اشتري [رقم السلعة] [عملات/رصيد] [الكمية]`\n**الشراء بالرصيد المميز يعطي ضعف الكمية**", color=0x3498db)
+        تضمين = discord.Embed(title="🛒 المتجر", description="اشتري بـ /اشتري [الرقم] [عملات/رصيد] [الكمية]\nالرصيد المميز يعطي ضعف الكمية", color=0x3498db)
         for س in السلع:
-            تضمين.add_field(name=f"{س['id']}. {س['name']}", value=f"🪙 {س['coinPrice']} | 💎 {س['creditPrice']}\n*{س['desc']}*", inline=True)
+            تضمين.add_field(name=f"{س['id']}. {س['name']}", value=f"🪙 {س['coinPrice']} | 💎 {س['creditPrice']}\n{س['desc']}", inline=True)
         await interaction.response.send_message(embed=تضمين)
 
-    @app_commands.command(name="اشتري", description="شراء سلعة من المتجر")
-    @app_commands.describe(رقم_السلعة="رقم السلعة", العملة="عملات أو رصيد", الكمية="الكمية (افتراضي 1)")
+    @app_commands.command(name="اشتري", description="شراء سلعة")
     @app_commands.choices(العملة=[
         app_commands.Choice(name="عملات", value="coins"),
         app_commands.Choice(name="رصيد مميز", value="credits")
@@ -94,7 +92,7 @@ class الاقتصاد(commands.Cog):
             الكمية = 1
         السلعة = await احصل_على_سلعة_من_المتجر(رقم_السلعة)
         if not السلعة:
-            await interaction.response.send_message("❌ رقم سلعة غير صحيح. استخدم `/المتجر` لمعرفة الأرقام.", ephemeral=True)
+            await interaction.response.send_message("❌ رقم سلعة خاطئ", ephemeral=True)
             return
         uid = str(interaction.user.id)
         بيانات = await احصل_على_مستخدم(uid)
@@ -104,27 +102,26 @@ class الاقتصاد(commands.Cog):
         else:
             السعر = السلعة["creditPrice"]
             المضاعف = 2
-        التكلفة_الكاملة = السعر * الكمية
+        التكلفة = السعر * الكمية
         if العملة == "coins":
-            if بيانات["coins"] < التكلفة_الكاملة:
-                await interaction.response.send_message(f"❌ ليس لديك عملات كافية. تحتاج {التكلفة_الكاملة} عملة.", ephemeral=True)
+            if بيانات["coins"] < التكلفة:
+                await interaction.response.send_message(f"❌ تحتاج {التكلفة} عملة", ephemeral=True)
                 return
-            await تحديث_مستخدم(uid, coins=بيانات["coins"] - التكلفة_الكاملة)
+            await تحديث_مستخدم(uid, coins=بيانات["coins"] - التكلفة)
         else:
-            if بيانات["credits"] < التكلفة_الكاملة:
-                await interaction.response.send_message(f"❌ ليس لديك رصيد مميز كافٍ. تحتاج {التكلفة_الكاملة} رصيد.", ephemeral=True)
+            if بيانات["credits"] < التكلفة:
+                await interaction.response.send_message(f"❌ تحتاج {التكلفة} رصيد", ephemeral=True)
                 return
-            await تحديث_مستخدم(uid, credits=بيانات["credits"] - التكلفة_الكاملة)
-        الكمية_المستلمة = الكمية * المضاعف
-        await أضف_إلى_المخزون(uid, رقم_السلعة, الكمية_المستلمة)
-        await interaction.response.send_message(f"✅ اشتريت **{الكمية_المستلمة}** × **{السلعة['name']}** مقابل {التكلفة_الكاملة} {('عملة' if العملة=='coins' else 'رصيد مميز')}.")
+            await تحديث_مستخدم(uid, credits=بيانات["credits"] - التكلفة)
+        await أضف_إلى_المخزون(uid, رقم_السلعة, الكمية * المضاعف)
+        await interaction.response.send_message(f"✅ اشتريت {الكمية * المضاعف} × {السلعة['name']}")
 
-    @app_commands.command(name="مخزني", description="عرض العناصر التي تمتلكها")
+    @app_commands.command(name="مخزني", description="عرض مخزونك")
     async def مخزني(self, interaction: discord.Interaction):
         uid = str(interaction.user.id)
         المخزون = await احصل_على_المخزون(uid)
         if not المخزون:
-            await interaction.response.send_message("📦 مخزونك فارغ. قم بشراء شيء من المتجر.", ephemeral=True)
+            await interaction.response.send_message("📦 مخزونك فارغ", ephemeral=True)
             return
         الوصف = ""
         for item_id, كمية in المخزون:
