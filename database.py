@@ -5,14 +5,15 @@ from config import عملات_البداية, رصيد_البداية
 
 async def تهيئة_قاعدة_البيانات():
     async with aiosqlite.connect(مسار_قاعدة_البيانات) as db:
+        # جملة CREATE TABLE بدون أي ? للقيم الافتراضية
         await db.execute('''CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
-            coins INTEGER DEFAULT ?,
-            credits INTEGER DEFAULT ?,
+            coins INTEGER DEFAULT 1000,
+            credits INTEGER DEFAULT 0,
             last_daily INTEGER DEFAULT 0,
             last_hourly INTEGER DEFAULT 0,
             active_team INTEGER DEFAULT 0
-        )''', (عملات_البداية, رصيد_البداية))
+        )''')
         
         await db.execute('''CREATE TABLE IF NOT EXISTS teams (
             user_id TEXT,
@@ -36,6 +37,7 @@ async def تهيئة_قاعدة_البيانات():
             description TEXT
         )''')
         
+        # التحقق من وجود بيانات في المتجر
         cursor = await db.execute("SELECT COUNT(*) FROM shop")
         count = (await cursor.fetchone())[0]
         if count == 0:
@@ -74,6 +76,7 @@ async def احصل_على_مستخدم(user_id):
         cursor = await db.execute("SELECT coins, credits, last_daily, last_hourly, active_team FROM users WHERE user_id = ?", (user_id,))
         row = await cursor.fetchone()
         if row is None:
+            # استخدام القيم من config.py عند إنشاء مستخدم جديد
             await db.execute("INSERT INTO users (user_id, coins, credits, last_daily, last_hourly, active_team) VALUES (?, ?, ?, ?, ?, ?)",
                               (user_id, عملات_البداية, رصيد_البداية, 0, 0, 0))
             await db.execute("INSERT OR IGNORE INTO teams (user_id, slot, name) VALUES (?, 0, ''), (?, 1, '')", (user_id, user_id))
