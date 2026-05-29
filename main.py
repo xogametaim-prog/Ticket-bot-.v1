@@ -51,6 +51,9 @@ if التوكن is None:
 بيانات_المهام = {}
 بيانات_الرسائل = {}
 
+بيانات_الدعوات = {}
+دعوات_السيرفرات = {}
+
 المتجر_العادي = {
     1: {"name": "🍎 تفاحة سحرية", "coinPrice": 100, "creditPrice": 5, "desc": "تستعيد 20 صحة فوراً"},
     2: {"name": "🗡️ سيف حديدي", "coinPrice": 250, "creditPrice": 10, "desc": "+25 ضرر"},
@@ -291,16 +294,76 @@ async def رسائل_تلقائية():
 async def before_رسائل_تلقائية():
     await البوت.wait_until_ready()
 
+async def تحديث_الدعوات(guild):
+    try:
+        دعوات_السيرفرات[guild.id] = {inv.code: inv.uses for inv in await guild.invites()}
+    except:
+        pass
+
 @البوت.event
 async def on_ready():
     print(f"✅ البوت دخل باسم: {البوت.user} (الاصدار 1.2)")
     await init_ticket_db()
+    for guild in البوت.guilds:
+        await تحديث_الدعوات(guild)
     رسائل_تلقائية.start()
     try:
         await البوت.tree.sync()
         print(f"🔄 تم مزامنة الأوامر")
     except Exception as e:
         print(f"❌ فشل المزامنة: {e}")
+
+@البوت.event
+async def on_guild_join(guild):
+    await تحديث_الدعوات(guild)
+    embed = discord.Embed(
+        title="⚙️ إعداد البوت",
+        description="مرحباً! لإعداد البوت في سيرفرك، يرجى استخدام الأمر `/اعدادات` لتحديد:\n- الرتبة المسؤولة عن التذاكر\n- قناة لوحة التذاكر\n- قناة الرسائل التلقائية\n- قناة الترحيب",
+        color=0x5865F2
+    )
+    for channel in guild.text_channels:
+        if channel.permissions_for(guild.me).send_messages:
+            await channel.send(embed=embed)
+            break
+
+@البوت.event
+async def on_member_join(member):
+    try:
+        invites_before = دعوات_السيرفرات.get(member.guild.id, {})
+        invites_after = {inv.code: inv.uses for inv in await member.guild.invites()}
+        
+        inviter = None
+        for code, uses in invites_after.items():
+            if code in invites_before and uses > invites_before[code]:
+                inviter = code
+                break
+        
+        if inviter:
+            async with aiosqlite.connect("ticket_data.db") as db:
+                cursor = await db.execute("SELECT قناة_الترحيب FROM اعدادات_السيرفر WHERE guild_id = ?", (str(member.guild.id),))
+                row = await cursor.fetchone()
+            
+            if row and row[0]:
+                channel = member.guild.get_channel(int(row[0]))
+                if channel:
+                    دعوة = await member.guild.fetch_invite(inviter)
+                    if دعوة and دعوة.inviter:
+                        inviter_name = دعوة.inviter.display_name
+                        بيانات_الدعوات[دعوة.inviter.id] = بيانات_الدعوات.get(دعوة.inviter.id, 0) + 1
+                        total_invites = بيانات_الدعوات[dعوة.inviter.id]
+                        
+                        embed = discord.Embed(
+                            title="🎉 عضو جديد!",
+                            description=f"مرحباً {member.mention} في السيرفر!",
+                            color=0x00FF00
+                        )
+                        embed.add_field(name="👤 تمت الدعوة بواسطة", value=inviter_name, inline=True)
+                        embed.add_field(name="📊 عدد الدعوات", value=str(total_invites), inline=True)
+                        await channel.send(embed=embed)
+        
+        دعوات_السيرفرات[member.guild.id] = {inv.code: inv.uses for inv in await member.guild.invites()}
+    except Exception as e:
+        print(f"خطأ في الترحيب: {e}")
 
 @البوت.event
 async def on_message(message):
@@ -318,21 +381,9 @@ async def on_message(message):
         advance_mission_progress(str(message.author.id), mission_text)
     await البوت.process_commands(message)
 
-@البوت.event
-async def on_guild_join(guild):
-    embed = discord.Embed(
-        title="⚙️ إعداد البوت",
-        description="مرحباً! لإعداد البوت في سيرفرك، يرجى استخدام الأمر `/اعدادات` لتحديد:\n- الرتبة المسؤولة عن التذاكر\n- قناة لوحة التذاكر\n- قناة الرسائل التلقائية",
-        color=0x5865F2
-    )
-    for channel in guild.text_channels:
-        if channel.permissions_for(guild.me).send_messages:
-            await channel.send(embed=embed)
-            break
-
 @البوت.tree.command(name="اعدادات", description="إعداد البوت في السيرفر")
-@app_commands.describe(role="الرتبة المسؤولة عن التذاكر", panel_channel="قناة لوحة التذاكر", auto_channel="قناة الرسائل التلقائية")
-async def اعدادات(interaction: discord.Interaction, role: discord.Role, panel_channel: discord.TextChannel, auto_channel: discord.TextChannel):
+@app_commands.describe(role="الرتبة المسؤولة عن التذاكر", panel_channel="قناة لوحة التذاكر", auto_channel="قناة الرسائل التلقائية", welcome_channel="قناة الترحيب")
+async def اعدادات(interaction: discord.Interaction, role: discord.Role, panel_channel: discord.TextChannel, auto_channel: discord.TextChannel, welcome_channel: discord.TextChannel = None):
     try:
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
@@ -343,8 +394,9 @@ async def اعدادات(interaction: discord.Interaction, role: discord.Role, p
         embed_color = "5865F2"
         
         async with aiosqlite.connect("ticket_data.db") as db:
-            await db.execute("INSERT OR REPLACE INTO اعدادات_السيرفر (guild_id, رتبة_التذاكر, قناة_البانل, قناة_الرسائل_التلقائية, رسالة_العنوان, رسالة_الوصف, لون_الرسالة, تم_الاعداد) VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
-                            (str(interaction.guild_id), str(role.id), str(panel_channel.id), str(auto_channel.id), embed_title, embed_description, embed_color))
+            welcome_channel_id = str(welcome_channel.id) if welcome_channel else None
+            await db.execute("INSERT OR REPLACE INTO اعدادات_السيرفر (guild_id, رتبة_التذاكر, قناة_البانل, قناة_الرسائل_التلقائية, قناة_الترحيب, رسالة_العنوان, رسالة_الوصف, لون_الرسالة, تم_الاعداد) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                            (str(interaction.guild_id), str(role.id), str(panel_channel.id), str(auto_channel.id), welcome_channel_id, embed_title, embed_description, embed_color))
             await db.commit()
         
         global رتبة_التذاكر_المسموح_لها
@@ -357,15 +409,18 @@ async def اعدادات(interaction: discord.Interaction, role: discord.Role, p
         await db.execute("INSERT OR REPLACE INTO بانل (guild_id, channel_id, message_id) VALUES (?, ?, ?)", (str(interaction.guild_id), str(panel_channel.id), str(msg.id)))
         await db.commit()
         
-        await interaction.response.send_message(f"✅ تم إعداد البوت بنجاح!\nالرتبة: {role.mention}\nقناة البانل: {panel_channel.mention}\nقناة الرسائل: {auto_channel.mention}", ephemeral=True)
+        await تحديث_الدعوات(interaction.guild)
+        
+        welcome_text = f"\nقناة الترحيب: {welcome_channel.mention}" if welcome_channel else ""
+        await interaction.response.send_message(f"✅ تم إعداد البوت بنجاح!\nالرتبة: {role.mention}\nقناة البانل: {panel_channel.mention}\nقناة الرسائل: {auto_channel.mention}{welcome_text}", ephemeral=True)
     except Exception as e:
         print(f"خطأ في اعدادات: {e}")
         await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
 
 @البوت.tree.command(name="setup", description="إعداد البوت في السيرفر")
-@app_commands.describe(role="الرتبة المسؤولة عن التذاكر", panel_channel="قناة لوحة التذاكر", auto_channel="قناة الرسائل التلقائية")
-async def setup(interaction: discord.Interaction, role: discord.Role, panel_channel: discord.TextChannel, auto_channel: discord.TextChannel):
-    await اعدادات(interaction, role, panel_channel, auto_channel)
+@app_commands.describe(role="الرتبة المسؤولة عن التذاكر", panel_channel="قناة لوحة التذاكر", auto_channel="قناة الرسائل التلقائية", welcome_channel="قناة الترحيب")
+async def setup(interaction: discord.Interaction, role: discord.Role, panel_channel: discord.TextChannel, auto_channel: discord.TextChannel, welcome_channel: discord.TextChannel = None):
+    await اعدادات(interaction, role, panel_channel, auto_channel, welcome_channel)
 
 @البوت.tree.command(name="edit", description="تعديل رسالة لوحة التذاكر")
 @app_commands.describe(title="العنوان الجديد", description="الوصف الجديد", color="اللون (Hex)")
@@ -419,7 +474,7 @@ async def edit_panel(interaction: discord.Interaction, title: str = None, descri
 async def about(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🤖 معلومات عن البوت",
-        description="بوت متكامل لإدارة التذاكر والألعاب والاقتصاد",
+        description="بوت متكامل لإدارة التذاكر والألعاب والاقتصاد وتتبع الدعوات",
         color=0x5865F2
     )
     embed.add_field(name="📦 الاصدار", value="1.2", inline=True)
@@ -440,6 +495,8 @@ async def gdpr(interaction: discord.Interaction):
         del بيانات_المهام[uid]
     if uid in بيانات_الرسائل:
         del بيانات_الرسائل[uid]
+    if uid in بيانات_الدعوات:
+        del بيانات_الدعوات[uid]
     async with aiosqlite.connect("ticket_data.db") as db:
         await db.execute("DELETE FROM تذاكر WHERE creator_id = ?", (uid,))
         await db.commit()
@@ -739,6 +796,7 @@ async def stats(interaction: discord.Interaction):
         embed.add_field(name="🟢 مفتوحة", value=str(open_tickets), inline=True)
         embed.add_field(name="🟡 مستلمة", value=str(claimed), inline=True)
         embed.add_field(name="👑 عدد المستخدمين", value=str(len(بيانات_المستخدمين)), inline=True)
+        embed.add_field(name="📊 إجمالي الدعوات", value=str(sum(بيانات_الدعوات.values())), inline=True)
         embed.set_footer(text=f"الاصدار 1.2")
         await interaction.response.send_message(embed=embed)
     except Exception as e:
@@ -1190,6 +1248,27 @@ async def brq(interaction: discord.Interaction):
     embed.add_field(name="📆 الأسبوع", value=str(week), inline=True)
     embed.add_field(name="📅 الشهر", value=str(month), inline=True)
     embed.add_field(name="📊 المجموع", value=str(total), inline=True)
+    await interaction.response.send_message(embed=embed)
+
+@البوت.tree.command(name="invites", description="عدد دعواتك")
+async def invites(interaction: discord.Interaction):
+    count = بيانات_الدعوات.get(str(interaction.user.id), 0)
+    embed = discord.Embed(title=f"📊 عدد دعوات {interaction.user.display_name}", color=0x00FF00)
+    embed.add_field(name="🎫 إجمالي الدعوات", value=str(count), inline=True)
+    await interaction.response.send_message(embed=embed)
+
+@البوت.tree.command(name="topinvites", description="ترتيب أكثر من دعا")
+async def topinvites(interaction: discord.Interaction):
+    sorted_invites = sorted(بيانات_الدعوات.items(), key=lambda x: x[1], reverse=True)[:10]
+    if not sorted_invites:
+        await interaction.response.send_message("لا توجد دعوات بعد", ephemeral=True)
+        return
+    desc = ""
+    for i, (uid, count) in enumerate(sorted_invites):
+        user = await البوت.fetch_user(int(uid))
+        name = user.display_name if user else "مجهول"
+        desc += f"{i+1}. **{name}** — {count} دعوة\n"
+    embed = discord.Embed(title="🏆 قائمة الأكثر دعوة", description=desc, color=0xFFD700)
     await interaction.response.send_message(embed=embed)
 
 if __name__ == "__main__":
