@@ -26,7 +26,7 @@ from collections import defaultdict
 
 @تطبيق_فلاسك.route('/')
 def الصفحة_الرئيسية():
-    return "البوت شغال! الإصدار 2.5"
+    return "البوت شغال! الإصدار 2.6"
 
 def تشغيل_الخادم():
     تطبيق_فلاسك.run(host='0.0.0.0', port=8080)
@@ -47,6 +47,9 @@ if التوكن is None:
 دعوات_السيرفرات = {}
 لعب_الروليت = {}
 سجل_الروليت = {}
+
+صورة_الروليت_الانتظار = "https://cdn.discordapp.com/attachments/1507384858652184737/1510379857845031105/1780172460649.png"
+صورة_الروليت_النتيجة = "https://cdn.discordapp.com/attachments/1507384858652184737/1510379865059233923/1780172455105.png"
 
 async def init_db():
     async with aiosqlite.connect("server_data.db") as db:
@@ -119,10 +122,67 @@ async def الحصول_على_عدد_الدعوات(user_id):
 async def الحصول_على_جميع_الدعوات():
     return sorted(بيانات_الدعوات.items(), key=lambda x: x[1], reverse=True)
 
+async def الحصول_على_أعضاء_الرتبة(guild, role):
+    members = []
+    for member in guild.members:
+        if role in member.roles:
+            members.append(member)
+    return members
+
+class RouletteGame:
+    def __init__(self, bot):
+        self.bot = bot
+        self.games = {}
+    
+    async def start_game(self, interaction_or_ctx, is_slash=False):
+        if is_slash:
+            guild_id = interaction_or_ctx.guild_id
+            author = interaction_or_ctx.user
+            send_func = interaction_or_ctx.response.send_message
+            is_interaction = True
+        else:
+            guild_id = interaction_or_ctx.guild.id
+            author = interaction_or_ctx.author
+            send_func = interaction_or_ctx.channel.send
+            is_interaction = False
+        
+        if guild_id in لعب_الروليت:
+            if is_interaction:
+                await send_func("❌ هناك لعبة روليت نشطة بالفعل في هذا السيرفر!", ephemeral=True)
+            else:
+                await send_func("❌ هناك لعبة روليت نشطة بالفعل في هذا السيرفر!")
+            return
+        
+        embed = discord.Embed(
+            title="🎡 روليت السيرفر",
+            description="**انضم الآن لتجربة حظك!**\nسيتم اختيار شخص واحد ليواجه المصير المحتوم.\n\n**المشتركين (0):**\nلا يوجد مشتركين بعد",
+            color=0xFF6600
+        )
+        embed.set_image(url=صورة_الروليت_الانتظار)
+        embed.add_field(name="⏰ المدة المتبقية", value="30 ثانية", inline=True)
+        embed.set_footer(text=f"بواسطة {author.display_name}")
+        
+        view = RouletteView(author.id, self.bot)
+        
+        if is_interaction:
+            await send_func(embed=embed, view=view)
+            message = await interaction_or_ctx.original_response()
+        else:
+            message = await send_func(embed=embed, view=view)
+        
+        view.message = message
+        لعب_الروليت[guild_id] = view
+        
+        await asyncio.sleep(30)
+        if guild_id in لعب_الروليت:
+            await view.on_timeout()
+            del لعب_الروليت[guild_id]
+
 class RouletteView(discord.ui.View):
-    def __init__(self, host_id):
+    def __init__(self, host_id, bot):
         super().__init__(timeout=30)
         self.host_id = host_id
+        self.bot = bot
         self.players = []
         self.message = None
     
@@ -146,11 +206,13 @@ class RouletteView(discord.ui.View):
     
     async def update_message(self):
         if self.message:
+            players_list = "\n".join([f"<@{pid}>" for pid in self.players]) if self.players else "لا يوجد مشتركين بعد"
             embed = discord.Embed(
                 title="🎡 روليت السيرفر",
-                description=f"انضم الآن لتجربة حظك! سيتم اختيار شخص واحد ليواجه المصير المحتوم.\n\n**المشتركين ({len(self.players)}):**\n" + "\n".join([f"<@{pid}>" for pid in self.players]) if self.players else "لا يوجد مشتركين بعد",
+                description=f"**انضم الآن لتجربة حظك!**\nسيتم اختيار شخص واحد ليواجه المصير المحتوم.\n\n**المشتركين ({len(self.players)}):**\n{players_list}",
                 color=0xFF6600
             )
+            embed.set_image(url=صورة_الروليت_الانتظار)
             embed.add_field(name="⏰ المدة المتبقية", value="30 ثانية", inline=True)
             embed.set_footer(text=f"بواسطة {self.bot.get_user(self.host_id).display_name if self.bot.get_user(self.host_id) else 'المشرف'}")
             await self.message.edit(embed=embed)
@@ -167,6 +229,7 @@ class RouletteView(discord.ui.View):
                 description=f"**تم اختيار {winner.mention} ليواجه المصير المحتوم!**\n\nتم طرد {winner.mention} من اللعبة.",
                 color=0xFF0000
             )
+            embed.set_image(url=صورة_الروليت_النتيجة)
             await self.message.edit(embed=embed, view=None)
             
             try:
@@ -179,44 +242,8 @@ class RouletteView(discord.ui.View):
                 description="انتهت اللعبة لعدم وجود مشتركين كافيين!",
                 color=0xFFAA00
             )
+            embed.set_image(url=صورة_الروليت_الانتظار)
             await self.message.edit(embed=embed, view=None)
-
-class RouletteGame:
-    def __init__(self, bot):
-        self.bot = bot
-        self.games = {}
-    
-    async def start_game(self, ctx_or_interaction, is_slash=False):
-        guild_id = ctx_or_interaction.guild.id if hasattr(ctx_or_interaction, 'guild') else ctx_or_interaction.guild_id
-        if guild_id in لعب_الروليت:
-            if is_slash:
-                await ctx_or_interaction.response.send_message("❌ هناك لعبة روليت نشطة بالفعل في هذا السيرفر!", ephemeral=True)
-            else:
-                await ctx_or_interaction.send("❌ هناك لعبة روليت نشطة بالفعل في هذا السيرفر!")
-            return
-        
-        embed = discord.Embed(
-            title="🎡 روليت السيرفر",
-            description="انضم الآن لتجربة حظك! سيتم اختيار شخص واحد ليواجه المصير المحتوم.\n\n**المشتركين (0):**\nلا يوجد مشتركين بعد",
-            color=0xFF6600
-        )
-        embed.add_field(name="⏰ المدة المتبقية", value="30 ثانية", inline=True)
-        
-        view = RouletteView(ctx_or_interaction.user.id if hasattr(ctx_or_interaction, 'user') else ctx_or_interaction.author.id)
-        view.bot = self.bot
-        
-        if is_slash:
-            await ctx_or_interaction.response.send_message(embed=embed, view=view)
-            message = await ctx_or_interaction.original_response()
-        else:
-            message = await ctx_or_interaction.send(embed=embed, view=view)
-        
-        view.message = message
-        لعب_الروليت[guild_id] = view
-        
-        await asyncio.sleep(30)
-        if guild_id in لعب_الروليت:
-            del لعب_الروليت[guild_id]
 
 class VerifyView(discord.ui.View):
     def __init__(self, role_id):
@@ -379,6 +406,52 @@ class StaffRatingView(discord.ui.View):
             print(f"خطأ في التقييم: {e}")
             await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
 
+class RoleMembersView(discord.ui.View):
+    def __init__(self, members, role_name, page=0):
+        super().__init__(timeout=60)
+        self.members = members
+        self.role_name = role_name
+        self.page = page
+        self.items_per_page = 10
+    
+    @discord.ui.button(label="◀ السابقة", style=discord.ButtonStyle.secondary, emoji="◀")
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page > 0:
+            self.page -= 1
+            await self.update_message(interaction)
+        else:
+            await interaction.response.send_message("❌ أنت في الصفحة الأولى!", ephemeral=True)
+    
+    @discord.ui.button(label="التالي ▶", style=discord.ButtonStyle.secondary, emoji="▶")
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if (self.page + 1) * self.items_per_page < len(self.members):
+            self.page += 1
+            await self.update_message(interaction)
+        else:
+            await interaction.response.send_message("❌ أنت في الصفحة الأخيرة!", ephemeral=True)
+    
+    async def update_message(self, interaction):
+        start = self.page * self.items_per_page
+        end = start + self.items_per_page
+        page_members = self.members[start:end]
+        
+        embed = discord.Embed(
+            title=f"👥 أعضاء رتبة {self.role_name}",
+            description=f"إجمالي الأعضاء: {len(self.members)}",
+            color=0x5865F2
+        )
+        
+        for member in page_members:
+            embed.add_field(
+                name=member.display_name,
+                value=f"<@{member.id}>\n🆔 {member.id}",
+                inline=False
+            )
+        
+        embed.set_footer(text=f"الصفحة {self.page + 1} من {((len(self.members) - 1) // self.items_per_page) + 1}")
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+
 @tasks.loop(minutes=5)
 async def تحديث_عدد_الأعضاء():
     try:
@@ -405,7 +478,7 @@ async def before_تحديث_عدد_الأعضاء():
 
 @البوت.event
 async def on_ready():
-    print(f"✅ البوت دخل باسم: {البوت.user} (الإصدار 2.5)")
+    print(f"✅ البوت دخل باسم: {البوت.user} (الإصدار 2.6)")
     await init_db()
     
     for guild in البوت.guilds:
@@ -771,6 +844,47 @@ async def سجل_الروليت(interaction: discord.Interaction):
         print(f"خطأ في سجل الروليت: {e}")
         await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
 
+@البوت.tree.command(name="أعضاء_الرتبة", description="عرض جميع أعضاء رتبة معينة")
+async def أعضاء_الرتبة(interaction: discord.Interaction, الرتبة: discord.Role):
+    try:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
+            return
+        
+        members = await الحصول_على_أعضاء_الرتبة(interaction.guild, الرتبة)
+        
+        if not members:
+            await interaction.response.send_message(f"❌ لا يوجد أعضاء في رتبة {الرتبة.mention}", ephemeral=True)
+            return
+        
+        start = 0
+        end = 10
+        page_members = members[start:end]
+        
+        embed = discord.Embed(
+            title=f"👥 أعضاء رتبة {الرتبة.name}",
+            description=f"إجمالي الأعضاء: {len(members)}",
+            color=الرتبة.color if الرتبة.color.value else 0x5865F2
+        )
+        
+        for member in page_members:
+            embed.add_field(
+                name=member.display_name,
+                value=f"<@{member.id}>\n🆔 {member.id}",
+                inline=False
+            )
+        
+        if len(members) > 10:
+            embed.set_footer(text="استخدم الأزرار للتنقل بين الصفحات | الصفحة 1")
+            view = RoleMembersView(members, الرتبة.name, 0)
+            await interaction.response.send_message(embed=embed, view=view)
+        else:
+            await interaction.response.send_message(embed=embed)
+    
+    except Exception as e:
+        print(f"خطأ في أعضاء الرتبة: {e}")
+        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
+
 @البوت.tree.command(name="دعواتي", description="عدد الدعوات التي قمت بها")
 async def دعواتي(interaction: discord.Interaction):
     try:
@@ -807,16 +921,17 @@ async def ترتيب_الدعوات(interaction: discord.Interaction):
 
 @البوت.tree.command(name="مساعدة", description="عرض جميع الأوامر")
 async def مساعدة(interaction: discord.Interaction):
-    embed = discord.Embed(title="🤖 قائمة أوامر البوت - الإصدار 2.5", color=0x5865F2)
+    embed = discord.Embed(title="🤖 قائمة أوامر البوت - الإصدار 2.6", color=0x5865F2)
     embed.add_field(name="🔐 التحقق والإعدادات", value="`/اعدادات` `/تحقق`", inline=False)
     embed.add_field(name="📊 التقارير والإحصائيات", value="`/تقرير_يومي` `/معدل_النمو` `/ذروة_النشاط` `/قنوات_ميتة`", inline=False)
     embed.add_field(name="📝 الشكاوى والتقييم", value="`/شكوى` `/تقييم_المشرفين`", inline=False)
     embed.add_field(name="🛡️ الحماية", value="`/حظر_الروابط`", inline=False)
     embed.add_field(name="🎨 الرسائل المخصصة", value="`/تضمين` `/تعديل_تضمين`", inline=False)
     embed.add_field(name="🎲 الألعاب (للأونر فقط)", value="`/روليت` `/سجل_الروليت`", inline=False)
+    embed.add_field(name="👥 إدارة الأعضاء", value="`/أعضاء_الرتبة`", inline=False)
     embed.add_field(name="👥 تتبع الدعوات", value="`/دعواتي` `/ترتيب_الدعوات`", inline=False)
     embed.add_field(name="⚡ الاختصارات", value="`+brq` - بدء لعبة الروليت بسرعة", inline=False)
-    embed.set_footer(text="تم التطوير بواسطة taim | الإصدار 2.5")
+    embed.set_footer(text="تم التطوير بواسطة taim | الإصدار 2.6")
     await interaction.response.send_message(embed=embed)
 
 if __name__ == "__main__":
