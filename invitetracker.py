@@ -41,18 +41,18 @@ def setup_invite_tracker(bot):
                             total_invites = بيانات_الدعوات[invite.inviter.id]
                             
                             embed = discord.Embed(
-                                title="🎉 عضو جديد!",
-                                description=f"مرحباً {member.mention} في السيرفر!",
+                                title="🎉 New Member!",
+                                description=f"Welcome {member.mention} to the server!",
                                 color=0x00FF00,
                                 timestamp=datetime.now()
                             )
-                            embed.add_field(name="👤 تمت الدعوة بواسطة", value=inviter_name, inline=True)
-                            embed.add_field(name="📊 عدد الدعوات", value=str(total_invites), inline=True)
+                            embed.add_field(name="👤 Invited by", value=inviter_name, inline=True)
+                            embed.add_field(name="📊 Total Invites", value=str(total_invites), inline=True)
                             await channel.send(embed=embed)
             
             دعوات_السيرفرات[member.guild.id] = {inv.code: inv.uses for inv in await member.guild.invites()}
         except Exception as e:
-            print(f"خطأ في الترحيب: {e}")
+            print(f"Welcome error: {e}")
     
     @bot.event
     async def on_guild_join(guild):
