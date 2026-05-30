@@ -26,7 +26,7 @@ from collections import defaultdict
 
 @تطبيق_فلاسك.route('/')
 def الصفحة_الرئيسية():
-    return "البوت شغال! الإصدار 2.7"
+    return "البوت شغال! الإصدار 2.8"
 
 def تشغيل_الخادم():
     تطبيق_فلاسك.run(host='0.0.0.0', port=8080)
@@ -50,6 +50,63 @@ if التوكن is None:
 
 صورة_الروليت_الانتظار = "https://cdn.discordapp.com/attachments/1507384858652184737/1510379857845031105/1780172460649.png"
 صورة_الروليت_النتيجة = "https://cdn.discordapp.com/attachments/1507384858652184737/1510379865059233923/1780172455105.png"
+
+# ========== الدالة الموحدة للـ Embed ==========
+async def create_embed(interaction_or_channel, title=None, description=None, color=None, image_url=None, fields=None, footer_text=None, is_ephemeral=False, view=None):
+    try:
+        if color is None:
+            color = 0x3498db
+        if isinstance(color, str):
+            color = int(color.replace("#", ""), 16)
+        
+        embed = discord.Embed(
+            title=title,
+            description=description,
+            color=color
+        )
+        
+        if image_url:
+            embed.set_image(url=image_url)
+        
+        if fields:
+            for field in fields:
+                embed.add_field(
+                    name=field.get("name", ""),
+                    value=field.get("value", ""),
+                    inline=field.get("inline", True)
+                )
+        
+        if footer_text:
+            embed.set_footer(text=footer_text)
+        
+        embed.timestamp = datetime.utcnow()
+        
+        if hasattr(interaction_or_channel, 'response'):
+            if interaction_or_channel.response.is_done():
+                await interaction_or_channel.followup.send(embed=embed, ephemeral=is_ephemeral, view=view)
+            else:
+                await interaction_or_channel.response.send_message(embed=embed, ephemeral=is_ephemeral, view=view)
+        else:
+            await interaction_or_channel.send(embed=embed, view=view)
+        
+        return embed
+    except Exception as e:
+        print(f"❌ خطأ في دالة create_embed: {e}")
+        try:
+            fallback_embed = discord.Embed(
+                description="حدث خطأ أثناء إنشاء الرسالة. يرجى إبلاغ الإدارة.",
+                color=0xFF0000
+            )
+            if hasattr(interaction_or_channel, 'response'):
+                if interaction_or_channel.response.is_done():
+                    await interaction_or_channel.followup.send(embed=fallback_embed, ephemeral=True)
+                else:
+                    await interaction_or_channel.response.send_message(embed=fallback_embed, ephemeral=True)
+            else:
+                await interaction_or_channel.send(embed=fallback_embed)
+        except:
+            print("❌ فشل إرسال رسالة الخطأ الاحتياطية")
+        return None
 
 async def init_db():
     async with aiosqlite.connect("server_data.db") as db:
@@ -96,6 +153,13 @@ async def init_db():
             result TEXT,
             created_at INTEGER
         )''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS game_points (
+            guild_id TEXT,
+            user_id TEXT,
+            points INTEGER DEFAULT 0,
+            games_won INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
         await db.commit()
 
 async def حفظ_سجل_الروليت(guild_id, user_id, user_name, result):
@@ -103,6 +167,20 @@ async def حفظ_سجل_الروليت(guild_id, user_id, user_name, result):
         await db.execute("INSERT INTO roulette_history (guild_id, user_id, user_name, result, created_at) VALUES (?, ?, ?, ?, ?)",
                         (str(guild_id), str(user_id), user_name, result, int(time.time())))
         await db.commit()
+
+async def تحديث_نقاط_اللعبة(guild_id, user_id, user_name, points=1):
+    async with aiosqlite.connect("server_data.db") as db:
+        await db.execute("INSERT INTO game_points (guild_id, user_id, points, games_won) VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id) DO UPDATE SET points = points + ?, games_won = games_won + 1",
+                        (str(guild_id), str(user_id), points, points))
+        await db.commit()
+
+async def الحصول_على_نقاط_اللاعب(guild_id, user_id):
+    async with aiosqlite.connect("server_data.db") as db:
+        cursor = await db.execute("SELECT points, games_won FROM game_points WHERE guild_id = ? AND user_id = ?", (str(guild_id), str(user_id)))
+        row = await cursor.fetchone()
+        if row:
+            return {"points": row[0], "games_won": row[1]}
+        return {"points": 0, "games_won": 0}
 
 async def تحديث_الدعوات(guild):
     try:
@@ -153,20 +231,31 @@ class RouletteGame:
             is_interaction = False
         
         if guild_id in لعب_الروليت:
-            if is_interaction:
-                await send_func("❌ هناك لعبة روليت نشطة بالفعل في هذا السيرفر!", ephemeral=True)
-            else:
-                await send_func("❌ هناك لعبة روليت نشطة بالفعل في هذا السيرفر!")
+            await create_embed(
+                interaction_or_ctx if is_interaction else interaction_or_ctx.channel,
+                description="❌ هناك لعبة روليت نشطة بالفعل في هذا السيرفر!",
+                color=0xFF0000,
+                is_ephemeral=True if is_interaction else False
+            )
             return
         
         game = RouletteGameSession(self.bot, guild_id, author.id)
         لعب_الروليت[guild_id] = game
         
         if is_interaction:
-            await send_func(embed=game.get_waiting_embed(), view=game)
+            await create_embed(
+                interaction_or_ctx,
+                title=game.get_waiting_embed().title,
+                description=game.get_waiting_embed().description,
+                color=game.get_waiting_embed().color.value,
+                image_url=صورة_الروليت_الانتظار,
+                fields=[{"name": f.name, "value": f.value, "inline": f.inline} for f in game.get_waiting_embed().fields],
+                footer_text=game.get_waiting_embed().footer.text,
+                view=game
+            )
             message = await interaction_or_ctx.original_response()
         else:
-            message = await send_func(embed=game.get_waiting_embed(), view=game)
+            message = await interaction_or_ctx.channel.send(embed=game.get_waiting_embed(), view=game)
         
         game.message = message
         await game.start_countdown()
@@ -237,15 +326,15 @@ class RouletteGameSession(discord.ui.View):
     @discord.ui.button(label="🎲 انضم", style=discord.ButtonStyle.success, emoji="🎲")
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.game_active:
-            await interaction.response.send_message("❌ اللعبة انتهت!", ephemeral=True)
+            await create_embed(interaction, description="❌ اللعبة انتهت!", color=0xFF0000, is_ephemeral=True)
             return
         
         if any(p.user_id == interaction.user.id for p in self.players):
-            await interaction.response.send_message("❌ أنت مشترك بالفعل!", ephemeral=True)
+            await create_embed(interaction, description="❌ أنت مشترك بالفعل!", color=0xFF0000, is_ephemeral=True)
             return
         
         self.players.append(GamePlayer(interaction.user.id, interaction.user.display_name))
-        await interaction.response.send_message(f"✅ {interaction.user.mention} انضم إلى الروليت!", ephemeral=True)
+        await create_embed(interaction, description=f"✅ {interaction.user.mention} انضم إلى الروليت!", color=0x00FF00, is_ephemeral=True)
         
         if self.message:
             await self.message.edit(embed=self.get_waiting_embed(), view=self)
@@ -253,16 +342,16 @@ class RouletteGameSession(discord.ui.View):
     @discord.ui.button(label="🚪 غادر", style=discord.ButtonStyle.danger, emoji="🚪")
     async def leave_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.game_active:
-            await interaction.response.send_message("❌ اللعبة انتهت!", ephemeral=True)
+            await create_embed(interaction, description="❌ اللعبة انتهت!", color=0xFF0000, is_ephemeral=True)
             return
         
         player = next((p for p in self.players if p.user_id == interaction.user.id), None)
         if not player:
-            await interaction.response.send_message("❌ لست مشتركاً في هذه اللعبة!", ephemeral=True)
+            await create_embed(interaction, description="❌ لست مشتركاً في هذه اللعبة!", color=0xFF0000, is_ephemeral=True)
             return
         
         self.players.remove(player)
-        await interaction.response.send_message(f"✅ {interaction.user.mention} غادر الروليت!", ephemeral=True)
+        await create_embed(interaction, description=f"✅ {interaction.user.mention} غادر الروليت!", color=0x00FF00, is_ephemeral=True)
         
         if self.message:
             await self.message.edit(embed=self.get_waiting_embed(), view=self)
@@ -337,26 +426,26 @@ class RouletteGameSession(discord.ui.View):
     
     async def kick_player(self, interaction, target_player, kicker_player=None):
         if not self.game_active:
-            await interaction.response.send_message("❌ اللعبة انتهت!", ephemeral=True)
+            await create_embed(interaction, description="❌ اللعبة انتهت!", color=0xFF0000, is_ephemeral=True)
             return
         
         if self.waiting_for_action == False:
-            await interaction.response.send_message("❌ ليس دورك الآن!", ephemeral=True)
+            await create_embed(interaction, description="❌ ليس دورك الآن!", color=0xFF0000, is_ephemeral=True)
             return
         
         current_player = self.players[self.current_turn_index]
         
         if kicker_player:
             if interaction.user.id != kicker_player.user_id:
-                await interaction.response.send_message("❌ ليس دورك!", ephemeral=True)
+                await create_embed(interaction, description="❌ ليس دورك!", color=0xFF0000, is_ephemeral=True)
                 return
         else:
             if interaction.user.id != current_player.user_id:
-                await interaction.response.send_message("❌ ليس دورك!", ephemeral=True)
+                await create_embed(interaction, description="❌ ليس دورك!", color=0xFF0000, is_ephemeral=True)
                 return
         
         if not target_player.is_alive:
-            await interaction.response.send_message("❌ هذا اللاعب تم طرده بالفعل!", ephemeral=True)
+            await create_embed(interaction, description="❌ هذا اللاعب تم طرده بالفعل!", color=0xFF0000, is_ephemeral=True)
             return
         
         target_player.is_alive = False
@@ -364,12 +453,10 @@ class RouletteGameSession(discord.ui.View):
         
         await حفظ_سجل_الروليت(self.guild_id, target_player.user_id, target_player.user_name, "تم الطرد")
         
-        kicker_name = kicker_player.user_name if kicker_player else current_player.user_name
-        
         if self.message:
             await self.message.edit(embed=self.get_result_embed(target_player, kicker_player or current_player), view=None)
         
-        await interaction.response.send_message(f"✅ {interaction.user.mention} قام بطرد {target_player.user_name}!", ephemeral=True)
+        await create_embed(interaction, description=f"✅ {interaction.user.mention} قام بطرد {target_player.user_name}!", color=0x00FF00, is_ephemeral=True)
         
         await asyncio.sleep(3)
         
@@ -401,23 +488,23 @@ class RouletteGameSession(discord.ui.View):
     @discord.ui.button(label="🔫 طرد عشوائي", style=discord.ButtonStyle.danger, emoji="🔫")
     async def random_kick_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.game_active:
-            await interaction.response.send_message("❌ اللعبة انتهت!", ephemeral=True)
+            await create_embed(interaction, description="❌ اللعبة انتهت!", color=0xFF0000, is_ephemeral=True)
             return
         
         if not self.waiting_for_action:
-            await interaction.response.send_message("❌ ليس دورك الآن!", ephemeral=True)
+            await create_embed(interaction, description="❌ ليس دورك الآن!", color=0xFF0000, is_ephemeral=True)
             return
         
         current_player = self.players[self.current_turn_index]
         
         if interaction.user.id != current_player.user_id:
-            await interaction.response.send_message("❌ ليس دورك!", ephemeral=True)
+            await create_embed(interaction, description="❌ ليس دورك!", color=0xFF0000, is_ephemeral=True)
             return
         
         alive_players = [p for p in self.players if p.is_alive and p.user_id != current_player.user_id]
         
         if not alive_players:
-            await interaction.response.send_message("❌ لا يوجد لاعبين آخرين للطرد!", ephemeral=True)
+            await create_embed(interaction, description="❌ لا يوجد لاعبين آخرين للطرد!", color=0xFF0000, is_ephemeral=True)
             return
         
         target = random.choice(alive_players)
@@ -426,23 +513,23 @@ class RouletteGameSession(discord.ui.View):
     @discord.ui.button(label="🎲 طرد لاعب", style=discord.ButtonStyle.primary, emoji="🎲")
     async def kick_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.game_active:
-            await interaction.response.send_message("❌ اللعبة انتهت!", ephemeral=True)
+            await create_embed(interaction, description="❌ اللعبة انتهت!", color=0xFF0000, is_ephemeral=True)
             return
         
         if not self.waiting_for_action:
-            await interaction.response.send_message("❌ ليس دورك الآن!", ephemeral=True)
+            await create_embed(interaction, description="❌ ليس دورك الآن!", color=0xFF0000, is_ephemeral=True)
             return
         
         current_player = self.players[self.current_turn_index]
         
         if interaction.user.id != current_player.user_id:
-            await interaction.response.send_message("❌ ليس دورك!", ephemeral=True)
+            await create_embed(interaction, description="❌ ليس دورك!", color=0xFF0000, is_ephemeral=True)
             return
         
         alive_players = [p for p in self.players if p.is_alive and p.user_id != current_player.user_id]
         
         if not alive_players:
-            await interaction.response.send_message("❌ لا يوجد لاعبين آخرين للطرد!", ephemeral=True)
+            await create_embed(interaction, description="❌ لا يوجد لاعبين آخرين للطرد!", color=0xFF0000, is_ephemeral=True)
             return
         
         view = PlayerSelectView(self, current_player, alive_players)
@@ -474,7 +561,7 @@ class PlayerSelectView(discord.ui.View):
         if target:
             await self.game.kick_player(interaction, target, self.current_player)
         else:
-            await interaction.response.send_message("❌ حدث خطأ في اختيار اللاعب!", ephemeral=True)
+            await create_embed(interaction, description="❌ حدث خطأ في اختيار اللاعب!", color=0xFF0000, is_ephemeral=True)
 
 class VerifyView(discord.ui.View):
     def __init__(self, role_id):
@@ -486,691 +573,694 @@ class VerifyView(discord.ui.View):
         try:
             role = interaction.guild.get_role(self.role_id)
             if not role:
-                await interaction.response.send_message("❌ رتبة التحقق غير موجودة! يرجى إبلاغ الإدارة.", ephemeral=True)
+                await create_embed(interaction, description="❌ رتبة التحقق غير موجودة! يرجى إبلاغ الإدارة.", color=0xFF0000, is_ephemeral=True)
                 return
             
             if role in interaction.user.roles:
-                await interaction.response.send_message("✅ أنت بالفعل عضو موثق!", ephemeral=True)
+                await create_embed(interaction, description="✅ أنت بالفعل عضو موثق!", color=0x00FF00, is_ephemeral=True)
                 return
             
             await interaction.user.add_roles(role)
-            await interaction.response.send_message("✅ تم التحقق بنجاح! مرحباً بك في السيرفر.", ephemeral=True)
+            await create_embed(interaction, description="✅ تم التحقق بنجاح! مرحباً بك في السيرفر.", color=0x00FF00, is_ephemeral=True)
             
             async with aiosqlite.connect("server_data.db") as db:
                 today = datetime.now().strftime("%Y-%m-%d")
-                await db.execute("INSERT INTO member_join_log (guild_id, date, count) VALUES (?, ?, 1) ON CONFLICT(guild_id, date) DO UPDATE SET count = count + 1", (str(interaction.guild_id), today))
+                await db.execute("INSERT INTO member_join_log (guild_id, date, count) VALUES (?, ?, 1) ON CONFLICT(guild_id, date) DO UPDATE SET count = count + 1",
+                                (str(interaction.guild_id), today))
                 await db.commit()
-                
-                cursor = await db.execute("SELECT welcome_channel FROM server_config WHERE guild_id = ?", (str(interaction.guild_id),))
-                row = await cursor.fetchone()
-            
-            if row and row[0]:
-                channel = interaction.guild.get_channel(int(row[0]))
-                if channel:
-                    embed = discord.Embed(title="🎉 عضو جديد موثق", description=f"{interaction.user.mention} قام بالتحقق وانضم إلى السيرفر!", color=0x00FF00)
-                    await channel.send(embed=embed)
         except Exception as e:
-            print(f"خطأ في التحقق: {e}")
-            await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
+            await create_embed(interaction, description=f"❌ حدث خطأ: {str(e)}", color=0xFF0000, is_ephemeral=True)
 
-class ComplaintModal(discord.ui.Modal, title="📝 شكوى مجهولة"):
-    complaint = discord.ui.TextInput(label="شكواك", style=discord.TextStyle.paragraph, placeholder="اكتب شكواك هنا...", required=True, max_length=1000)
+# ========== نظام الألعاب (Games Cog) ==========
+class Games(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.active_games = {}
+        self.game_listeners = {}
     
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            async with aiosqlite.connect("server_data.db") as db:
-                cursor = await db.execute("SELECT logs_channel FROM server_config WHERE guild_id = ?", (str(interaction.guild_id),))
-                row = await cursor.fetchone()
-                await db.execute("INSERT INTO complaints (guild_id, complaint, created_at) VALUES (?, ?, ?)", 
-                                (str(interaction.guild_id), self.complaint.value, int(datetime.now().timestamp())))
-                await db.commit()
-            
-            if row and row[0]:
-                channel = interaction.guild.get_channel(int(row[0]))
-                if channel:
-                    embed = discord.Embed(title="📝 شكوى جديدة (مجهولة المصدر)", description=self.complaint.value, color=0xFF6600, timestamp=datetime.now())
-                    await channel.send(embed=embed)
-            
-            await interaction.response.send_message("✅ تم إرسال شكواك بنجاح!", ephemeral=True)
-        except Exception as e:
-            print(f"خطأ في الشكوى: {e}")
-            await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-class ComplaintsView(discord.ui.View):
-    @discord.ui.button(label="📝 تقديم شكوى", style=discord.ButtonStyle.danger, emoji="📝")
-    async def complaint_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ComplaintModal())
-
-class EmbedBuilderModal(discord.ui.Modal, title="🎨 إنشاء رسالة Embed"):
-    title = discord.ui.TextInput(label="العنوان", placeholder="أدخل عنوان الرسالة...", required=True, max_length=256)
-    description = discord.ui.TextInput(label="الوصف", style=discord.TextStyle.paragraph, placeholder="أدخل نص الرسالة...", required=True, max_length=4000)
-    color = discord.ui.TextInput(label="اللون (Hex)", placeholder="5865F2", required=False, default="5865F2", max_length=6)
-    footer = discord.ui.TextInput(label="تذييل (اختياري)", required=False, max_length=2048)
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            color_int = int(self.color.value, 16) if self.color.value else 0x5865F2
-        except:
-            color_int = 0x5865F2
-        embed = discord.Embed(title=self.title.value, description=self.description.value, color=color_int)
-        if self.footer.value:
-            embed.set_footer(text=self.footer.value)
-        await interaction.response.send_message(embed=embed)
-
-class EmbedEditView(discord.ui.View):
-    def __init__(self, message, original_embed):
-        super().__init__(timeout=60)
-        self.message = message
-        self.original_embed = original_embed
-    
-    @discord.ui.button(label="✏️ تعديل", style=discord.ButtonStyle.primary, emoji="✏️")
-    async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = EditEmbedModal(self.message, self.original_embed)
-        await interaction.response.send_modal(modal)
-    
-    @discord.ui.button(label="🗑️ حذف", style=discord.ButtonStyle.danger, emoji="🗑️")
-    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.message.delete()
-        await interaction.response.send_message("✅ تم حذف الرسالة", ephemeral=True)
-
-class EditEmbedModal(discord.ui.Modal, title="✏️ تعديل Embed"):
-    title = discord.ui.TextInput(label="العنوان", required=False)
-    description = discord.ui.TextInput(label="الوصف", style=discord.TextStyle.paragraph, required=False)
-    color = discord.ui.TextInput(label="اللون (Hex)", required=False)
-    footer = discord.ui.TextInput(label="تذييل", required=False)
-    
-    def __init__(self, message, original_embed):
-        super().__init__()
-        self.message = message
-        self.original_embed = original_embed
-        self.title.default = original_embed.title or ""
-        self.description.default = original_embed.description or ""
-        self.color.default = hex(original_embed.color.value)[2:] if original_embed.color else "5865F2"
-        self.footer.default = original_embed.footer.text if original_embed.footer else ""
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        new_title = self.title.value or self.original_embed.title
-        new_desc = self.description.value or self.original_embed.description
-        try:
-            color_int = int(self.color.value, 16) if self.color.value else self.original_embed.color.value
-        except:
-            color_int = self.original_embed.color.value or 0x5865F2
-        new_embed = discord.Embed(title=new_title, description=new_desc, color=color_int)
-        if self.footer.value:
-            new_embed.set_footer(text=self.footer.value)
-        await self.message.edit(embed=new_embed)
-        await interaction.response.send_message("✅ تم تعديل الرسالة", ephemeral=True)
-
-class StaffRatingView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=3600)
-    
-    @discord.ui.button(label="⭐ 1 نجمة", style=discord.ButtonStyle.secondary, emoji="⭐")
-    async def rate_1(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.save_rating(interaction, 1)
-    
-    @discord.ui.button(label="⭐⭐ 2 نجمة", style=discord.ButtonStyle.secondary, emoji="⭐⭐")
-    async def rate_2(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.save_rating(interaction, 2)
-    
-    @discord.ui.button(label="⭐⭐⭐ 3 نجمة", style=discord.ButtonStyle.primary, emoji="⭐⭐⭐")
-    async def rate_3(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.save_rating(interaction, 3)
-    
-    @discord.ui.button(label="⭐⭐⭐⭐ 4 نجمة", style=discord.ButtonStyle.success, emoji="⭐⭐⭐⭐")
-    async def rate_4(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.save_rating(interaction, 4)
-    
-    @discord.ui.button(label="⭐⭐⭐⭐⭐ 5 نجمة", style=discord.ButtonStyle.success, emoji="⭐⭐⭐⭐⭐")
-    async def rate_5(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.save_rating(interaction, 5)
-    
-    async def save_rating(self, interaction: discord.Interaction, rating: int):
-        try:
-            async with aiosqlite.connect("server_data.db") as db:
-                await db.execute("INSERT OR REPLACE INTO staff_ratings (guild_id, user_id, rating, created_at) VALUES (?, ?, ?, ?)",
-                                (str(interaction.guild_id), str(interaction.user.id), rating, int(datetime.now().timestamp())))
-                await db.commit()
-            
-            await interaction.response.send_message(f"✅ شكراً لتقييمك: {rating} نجمة!", ephemeral=True)
-        except Exception as e:
-            print(f"خطأ في التقييم: {e}")
-            await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-class RoleMembersView(discord.ui.View):
-    def __init__(self, members, role_name, page=0):
-        super().__init__(timeout=60)
-        self.members = members
-        self.role_name = role_name
-        self.page = page
-        self.items_per_page = 10
-    
-    @discord.ui.button(label="◀ السابقة", style=discord.ButtonStyle.secondary, emoji="◀")
-    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.page > 0:
-            self.page -= 1
-            await self.update_message(interaction)
-        else:
-            await interaction.response.send_message("❌ أنت في الصفحة الأولى!", ephemeral=True)
-    
-    @discord.ui.button(label="التالي ▶", style=discord.ButtonStyle.secondary, emoji="▶")
-    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if (self.page + 1) * self.items_per_page < len(self.members):
-            self.page += 1
-            await self.update_message(interaction)
-        else:
-            await interaction.response.send_message("❌ أنت في الصفحة الأخيرة!", ephemeral=True)
-    
-    async def update_message(self, interaction):
-        start = self.page * self.items_per_page
-        end = start + self.items_per_page
-        page_members = self.members[start:end]
+    @app_commands.command(name="game", description="فتح قائمة ألعاب السرعة")
+    async def game_command(self, interaction: discord.Interaction):
+        if interaction.guild_id in self.active_games:
+            await create_embed(interaction, description="❌ هناك لعبة نشطة بالفعل في هذا السيرفر!", color=0xFF0000, is_ephemeral=True)
+            return
         
-        embed = discord.Embed(
-            title=f"👥 أعضاء رتبة {self.role_name}",
-            description=f"إجمالي الأعضاء: {len(self.members)}",
-            color=0x5865F2
+        view = GameSelectionView(self)
+        await create_embed(
+            interaction,
+            title="🎮 قائمة ألعاب السرعة",
+            description="اختر لعبة من القائمة أدناه لبدء التحدي!",
+            color=0x9B59B6,
+            view=view
+        )
+    
+    async def start_game_session(self, interaction, game_name, game_type):
+        if interaction.guild_id in self.active_games:
+            await create_embed(interaction, description="❌ هناك لعبة نشطة بالفعل!", color=0xFF0000, is_ephemeral=True)
+            return
+        
+        game_data = self.get_game_data(game_type)
+        if not game_data:
+            await create_embed(interaction, description="❌ لعبة غير معروفة!", color=0xFF0000, is_ephemeral=True)
+            return
+        
+        self.active_games[interaction.guild_id] = {
+            "type": game_type,
+            "players": {},
+            "start_time": time.time(),
+            "channel_id": interaction.channel_id,
+            "host_id": interaction.user.id
+        }
+        
+        embed_data = {
+            "title": f"🎮 {game_name}",
+            "description": game_data["description"],
+            "color": game_data["color"],
+            "image_url": game_data["image_url"],
+            "fields": [
+                {"name": "⏰ الوقت", "value": f"{game_data['timeout']} ثانية", "inline": True},
+                {"name": "👤 بواسطة", "value": interaction.user.mention, "inline": True},
+                {"name": "📋 القوانين", "value": game_data["rules"], "inline": False}
+            ],
+            "footer_text": "أول إجابة صحيحة تفوز!"
+        }
+        
+        await create_embed(interaction, **embed_data)
+        
+        if interaction.guild_id in self.game_listeners:
+            self.bot.remove_listener(self.game_listeners[interaction.guild_id])
+        
+        listener = self.create_game_listener(interaction.guild_id, game_type)
+        self.game_listeners[interaction.guild_id] = listener
+        self.bot.add_listener(listener)
+        
+        asyncio.create_task(self.end_game_after_timeout(interaction.guild_id, game_data["timeout"]))
+    
+    def create_game_listener(self, guild_id, game_type):
+        async def on_message(message):
+            if message.guild is None:
+                return
+            if message.guild.id != guild_id:
+                return
+            if message.author.bot:
+                return
+            if guild_id not in self.active_games:
+                return
+            if message.channel.id != self.active_games[guild_id]["channel_id"]:
+                return
+            
+            game = self.active_games[guild_id]
+            if game["type"] != game_type:
+                return
+            
+            is_correct = False
+            
+            if game_type == "speed_typing":
+                target_text = game.get("target_text", "")
+                if message.content.strip().lower() == target_text.strip().lower():
+                    is_correct = True
+            
+            elif game_type == "unscramble":
+                correct_word = game.get("correct_word", "")
+                if message.content.strip().lower() == correct_word.strip().lower():
+                    is_correct = True
+            
+            elif game_type == "math":
+                correct_answer = game.get("correct_answer")
+                try:
+                    user_answer = int(message.content.strip())
+                    if user_answer == correct_answer:
+                        is_correct = True
+                except:
+                    pass
+            
+            elif game_type == "trivia":
+                correct_option = game.get("correct_option", "")
+                if message.content.strip().lower() == correct_option.lower():
+                    is_correct = True
+            
+            elif game_type == "word_chain":
+                last_letter = game.get("last_letter", "")
+                if message.content.strip() and message.content.strip()[0].lower() == last_letter.lower():
+                    is_correct = True
+                    game["last_letter"] = message.content.strip()[-1]
+            
+            elif game_type == "emoji_guess":
+                correct_answer = game.get("correct_answer", "")
+                if message.content.strip().lower() == correct_answer.strip().lower():
+                    is_correct = True
+            
+            elif game_type == "fill_blank":
+                correct_answer = game.get("correct_answer", "")
+                if message.content.strip().lower() == correct_answer.strip().lower():
+                    is_correct = True
+            
+            elif game_type == "reverse_word":
+                correct_answer = game.get("correct_answer", "")
+                if message.content.strip().lower() == correct_answer.strip().lower():
+                    is_correct = True
+            
+            elif game_type == "categories":
+                category = game.get("category", "")
+                if message.content.strip():
+                    is_correct = True
+            
+            elif game_type == "first_to_type":
+                is_correct = True
+            
+            if is_correct:
+                await self.declare_winner(message)
+        
+        return on_message
+    
+    async def declare_winner(self, message):
+        guild_id = message.guild.id
+        if guild_id not in self.active_games:
+            return
+        
+        game = self.active_games[guild_id]
+        winner_id = message.author.id
+        winner_name = message.author.display_name
+        
+        game["winner"] = winner_id
+        
+        if guild_id in self.game_listeners:
+            self.bot.remove_listener(self.game_listeners[guild_id])
+            del self.game_listeners[guild_id]
+        
+        await تحديث_نقاط_اللعبة(guild_id, winner_id, winner_name)
+        player_stats = await الحصول_على_نقاط_اللاعب(guild_id, winner_id)
+        
+        game_names = {
+            "speed_typing": "أسرع كاتب",
+            "unscramble": "فكك الكلمة",
+            "math": "الحساب السريع",
+            "trivia": "معلومات عامة",
+            "word_chain": "سلسلة الكلمات",
+            "emoji_guess": "خمن الإيموجي",
+            "fill_blank": "أكمل الفراغ",
+            "reverse_word": "الكلمة المعكوسة",
+            "categories": "فئات",
+            "first_to_type": "أول من يكتب"
+        }
+        
+        game_name = game_names.get(game["type"], "لعبة")
+        
+        await create_embed(
+            message.channel,
+            title="🏆 فائز!",
+            description=f"**{message.author.mention} فاز في {game_name}!**\n\n📊 **إحصائيات اللاعب:**\n• النقاط: {player_stats['points']}\n• الألعاب التي فاز بها: {player_stats['games_won']}",
+            color=0xFFD700,
+            footer_text="استخدم /game للعب مرة أخرى"
         )
         
-        for member in page_members:
-            embed.add_field(
-                name=member.display_name,
-                value=f"<@{member.id}>\n🆔 {member.id}",
-                inline=False
+        del self.active_games[guild_id]
+    
+    async def end_game_after_timeout(self, guild_id, timeout):
+        await asyncio.sleep(timeout)
+        
+        if guild_id not in self.active_games:
+            return
+        
+        game = self.active_games[guild_id]
+        
+        if "winner" in game:
+            return
+        
+        channel = self.bot.get_channel(game["channel_id"])
+        if channel:
+            await create_embed(
+                channel,
+                title="⏰ انتهى الوقت!",
+                description="لم يفز أحد في هذه الجولة. حاول مرة أخرى!",
+                color=0xFFA500,
+                footer_text="استخدم /game للعب مرة أخرى"
             )
         
-        embed.set_footer(text=f"الصفحة {self.page + 1} من {((len(self.members) - 1) // self.items_per_page) + 1}")
+        if guild_id in self.game_listeners:
+            self.bot.remove_listener(self.game_listeners[guild_id])
+            del self.game_listeners[guild_id]
         
-        await interaction.response.edit_message(embed=embed, view=self)
-
-@tasks.loop(minutes=5)
-async def تحديث_عدد_الأعضاء():
-    try:
-        async with aiosqlite.connect("server_data.db") as db:
-            cursor = await db.execute("SELECT guild_id, member_count_channel FROM server_config WHERE member_count_channel IS NOT NULL")
-            rows = await cursor.fetchall()
-        
-        for guild_id, channel_id in rows:
-            guild = البوت.get_guild(int(guild_id))
-            if not guild:
-                continue
-            channel = guild.get_channel(int(channel_id))
-            if not channel:
-                continue
-            new_name = f"👥 الأعضاء: {guild.member_count}"
-            if channel.name != new_name:
-                await channel.edit(name=new_name)
-    except Exception as e:
-        print(f"خطأ في تحديث عدد الأعضاء: {e}")
-
-@تحديث_عدد_الأعضاء.before_loop
-async def before_تحديث_عدد_الأعضاء():
-    await البوت.wait_until_ready()
-
-@البوت.event
-async def on_ready():
-    print(f"✅ البوت دخل باسم: {البوت.user} (الإصدار 2.7)")
-    await init_db()
+        del self.active_games[guild_id]
     
-    for guild in البوت.guilds:
+    def get_game_data(self, game_type):
+        games = {
+            "speed_typing": {
+                "description": "اكتب النص المعروض بأسرع وقت ممكن! أول من يكتبه بشكل صحيح يفوز.",
+                "color": 0x2ECC71,
+                "image_url": "https://cdn.discordapp.com/attachments/1507384858652184737/1510379857845031105/1780172460649.png",
+                "timeout": 30,
+                "rules": "اكتب النص بالضبط كما يظهر."
+            },
+            "unscramble": {
+                "description": "أعد ترتيب الحروف لتكوين كلمة صحيحة!",
+                "color": 0xE74C3C,
+                "image_url": "https://cdn.discordapp.com/attachments/1507384858652184737/1510379865059233923/1780172455105.png",
+                "timeout": 30,
+                "rules": "أرسل الكلمة الصحيحة."
+            },
+            "math": {
+                "description": "أجب عن المسألة الحسابية بسرعة!",
+                "color": 0x3498DB,
+                "image_url": "https://cdn.discordapp.com/attachments/1507384858652184737/1510379857845031105/1780172460649.png",
+                "timeout": 20,
+                "rules": "أرسل الرقم الصحيح."
+            },
+            "trivia": {
+                "description": "أجب عن سؤال المعلومات العامة!",
+                "color": 0xF39C12,
+                "image_url": "https://cdn.discordapp.com/attachments/1507384858652184737/1510379865059233923/1780172455105.png",
+                "timeout": 30,
+                "rules": "أرسل رقم الخيار الصحيح (1، 2، 3، 4)."
+            },
+            "word_chain": {
+                "description": "اكتب كلمة تبدأ بآخر حرف من الكلمة المعطاة!",
+                "color": 0x9B59B6,
+                "image_url": "https://cdn.discordapp.com/attachments/1507384858652184737/1510379857845031105/1780172460649.png",
+                "timeout": 30,
+                "rules": "يجب أن تبدأ الكلمة بالحرف الأخير."
+            },
+            "emoji_guess": {
+                "description": "خمن الكلمة أو العبارة من الإيموجي!",
+                "color": 0x1ABC9C,
+                "image_url": "https://cdn.discordapp.com/attachments/1507384858652184737/1510379865059233923/1780172455105.png",
+                "timeout": 30,
+                "rules": "أرسل الكلمة الصحيحة."
+            },
+            "fill_blank": {
+                "description": "أكمل الجملة بالكلمة الناقصة!",
+                "color": 0xE67E22,
+                "image_url": "https://cdn.discordapp.com/attachments/1507384858652184737/1510379857845031105/1780172460649.png",
+                "timeout": 25,
+                "rules": "أرسل الكلمة الناقصة."
+            },
+            "reverse_word": {
+                "description": "اقرأ الكلمة المعكوسة واكتبها بشكل صحيح!",
+                "color": 0xC0392B,
+                "image_url": "https://cdn.discordapp.com/attachments/1507384858652184737/1510379865059233923/1780172455105.png",
+                "timeout": 30,
+                "rules": "اكتب الكلمة بالترتيب الصحيح."
+            },
+            "categories": {
+                "description": "اكتب كلمة تنتمي للفئة المطلوبة!",
+                "color": 0x27AE60,
+                "image_url": "https://cdn.discordapp.com/attachments/1507384858652184737/1510379857845031105/1780172460649.png",
+                "timeout": 30,
+                "rules": "يجب أن تنتمي الكلمة للفئة."
+            },
+            "first_to_type": {
+                "description": "أول من يكتب أي شيء يفوز!",
+                "color": 0x8E44AD,
+                "image_url": "https://cdn.discordapp.com/attachments/1507384858652184737/1510379865059233923/1780172455105.png",
+                "timeout": 20,
+                "rules": "أي رسالة تعتبر فوزاً."
+            }
+        }
+        return games.get(game_type)
+    
+    async def prepare_game_challenge(self, guild_id, game_type, channel):
+        if game_type == "speed_typing":
+            phrases = ["السرعة في الكتابة مهارة مهمة", "البوت يساعد في تنظيم السيرفر", "مرحباً بكم في لعبة أسرع كاتب"]
+            target = random.choice(phrases)
+            self.active_games[guild_id]["target_text"] = target
+            await channel.send(f"📝 **اكتب النص التالي بأسرع وقت:**\n`{target}`")
+        
+        elif game_type == "unscramble":
+            words = ["تفاحة", "مدرسة", "كمبيوتر", "مكتبة", "سيارة"]
+            word = random.choice(words)
+            scrambled = ''.join(random.sample(word, len(word)))
+            self.active_games[guild_id]["correct_word"] = word
+            await channel.send(f"🔤 **أعد ترتيب الحروف لتكوين كلمة:**\n`{scrambled}`")
+        
+        elif game_type == "math":
+            a = random.randint(1, 20)
+            b = random.randint(1, 20)
+            op = random.choice(['+', '-', '*'])
+            if op == '+':
+                answer = a + b
+            elif op == '-':
+                answer = a - b
+            else:
+                answer = a * b
+            self.active_games[guild_id]["correct_answer"] = answer
+            await channel.send(f"🧮 **ما ناتج:**\n`{a} {op} {b} = ?`")
+        
+        elif game_type == "trivia":
+            questions = [
+                {"q": "ما هو أكبر كوكب في المجموعة الشمسية؟", "options": ["1. الأرض", "2. المشتري", "3. زحل", "4. المريخ"], "answer": "2"},
+                {"q": "كم عدد أيام السنة الميلادية؟", "options": ["1. 360", "2. 365", "3. 366", "4. 364"], "answer": "2"},
+                {"q": "ما هو لون السماء في النهار؟", "options": ["1. أحمر", "2. أزرق", "3. أخضر", "4. أصفر"], "answer": "2"}
+            ]
+            q = random.choice(questions)
+            self.active_games[guild_id]["correct_option"] = q["answer"]
+            options_text = "\n".join(q["options"])
+            await channel.send(f"❓ **{q['q']}**\n{options_text}")
+        
+        elif game_type == "word_chain":
+            words = ["كتاب", "باب", "بيت", "تفاح", "حديد"]
+            word = random.choice(words)
+            self.active_games[guild_id]["last_letter"] = word[-1]
+            await channel.send(f"🔗 **اكتب كلمة تبدأ بحرف:** `{word[-1]}`\nالكلمة الأصلية: `{word}`")
+        
+        elif game_type == "emoji_guess":
+            challenges = [
+                {"emojis": "🏠🐶", "answer": "بيت الكلب"},
+                {"emojis": "📚🏫", "answer": "مكتبة المدرسة"},
+                {"emojis": "🍎🌳", "answer": "شجرة التفاح"}
+            ]
+            c = random.choice(challenges)
+            self.active_games[guild_id]["correct_answer"] = c["answer"]
+            await channel.send(f"😎 **خمن العبارة:**\n{c['emojis']}")
+        
+        elif game_type == "fill_blank":
+            sentences = [
+                {"text": "القاهرة عاصمة _____", "answer": "مصر"},
+                {"text": "الشمس تشرق من _____", "answer": "الشرق"},
+                {"text": "الماء _____ الحياة", "answer": "سر"}
+            ]
+            s = random.choice(sentences)
+            self.active_games[guild_id]["correct_answer"] = s["answer"]
+            await channel.send(f"✍️ **أكمل الفراغ:**\n`{s['text']}`")
+        
+        elif game_type == "reverse_word":
+            words = ["سلام", "مدرسة", "قلم", "كتاب", "شمس"]
+            word = random.choice(words)
+            reversed_word = word[::-1]
+            self.active_games[guild_id]["correct_answer"] = word
+            await channel.send(f"🔄 **ما هي الكلمة الصحيحة:**\n`{reversed_word}`")
+        
+        elif game_type == "categories":
+            categories = [
+                {"name": "فواكه", "examples": "تفاح، برتقال، موز"},
+                {"name": "حيوانات", "examples": "أسد، نمر، فيل"},
+                {"name": "ألوان", "examples": "أحمر، أزرق، أخضر"}
+            ]
+            c = random.choice(categories)
+            self.active_games[guild_id]["category"] = c["name"]
+            await channel.send(f"📂 **اذكر شيئاً من فئة:** `{c['name']}`\nمثال: {c['examples']}")
+        
+        elif game_type == "first_to_type":
+            await channel.send("⚡ **أول من يكتب أي شيء يفوز!**")
+
+class GameSelectionView(discord.ui.View):
+    def __init__(self, games_cog):
+        super().__init__(timeout=60)
+        self.games_cog = games_cog
+        
+        options = [
+            discord.SelectOption(label="أسرع كاتب", value="speed_typing", description="اكتب النص بأسرع وقت", emoji="⌨️"),
+            discord.SelectOption(label="فكك الكلمة", value="unscramble", description="أعد ترتيب الحروف", emoji="🔤"),
+            discord.SelectOption(label="الحساب السريع", value="math", description="أجب عن المسألة الحسابية", emoji="🧮"),
+            discord.SelectOption(label="معلومات عامة", value="trivia", description="أجب عن سؤال معلومات عامة", emoji="❓"),
+            discord.SelectOption(label="سلسلة الكلمات", value="word_chain", description="اكتب كلمة تبدأ بالحرف الأخير", emoji="🔗"),
+            discord.SelectOption(label="خمن الإيموجي", value="emoji_guess", description="خمن الكلمة من الإيموجي", emoji="😎"),
+            discord.SelectOption(label="أكمل الفراغ", value="fill_blank", description="أكمل الجملة بالكلمة الناقصة", emoji="✍️"),
+            discord.SelectOption(label="الكلمة المعكوسة", value="reverse_word", description="اقرأ الكلمة المعكوسة", emoji="🔄"),
+            discord.SelectOption(label="فئات", value="categories", description="اذكر شيئاً من الفئة", emoji="📂"),
+            discord.SelectOption(label="أول من يكتب", value="first_to_type", description="أول رسالة تفوز", emoji="⚡")
+        ]
+        
+        select = discord.ui.Select(
+            placeholder="اختر لعبة...",
+            options=options
+        )
+        select.callback = self.select_callback
+        self.add_item(select)
+    
+    async def select_callback(self, interaction: discord.Interaction):
+        game_type = interaction.data["values"][0]
+        game_names = {
+            "speed_typing": "أسرع كاتب",
+            "unscramble": "فكك الكلمة",
+            "math": "الحساب السريع",
+            "trivia": "معلومات عامة",
+            "word_chain": "سلسلة الكلمات",
+            "emoji_guess": "خمن الإيموجي",
+            "fill_blank": "أكمل الفراغ",
+            "reverse_word": "الكلمة المعكوسة",
+            "categories": "فئات",
+            "first_to_type": "أول من يكتب"
+        }
+        
+        await self.games_cog.start_game_session(interaction, game_names[game_type], game_type)
+        await self.games_cog.prepare_game_challenge(interaction.guild_id, game_type, interaction.channel)
+
+# ========== نظام المساعدة ==========
+class HelpView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+    
+    @discord.ui.button(label="🎮 الألعاب", style=discord.ButtonStyle.primary, emoji="🎮")
+    async def games_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎮 قائمة ألعاب السرعة",
+            description="**الألعاب المتاحة:**\n\n1. ⌨️ **أسرع كاتب** - اكتب النص بأسرع وقت\n2. 🔤 **فكك الكلمة** - أعد ترتيب الحروف\n3. 🧮 **الحساب السريع** - أجب عن المسألة\n4. ❓ **معلومات عامة** - أجب عن السؤال\n5. 🔗 **سلسلة الكلمات** - اكتب كلمة بالحرف الأخير\n6. 😎 **خمن الإيموجي** - خمن من الإيموجي\n7. ✍️ **أكمل الفراغ** - أكمل الجملة\n8. 🔄 **الكلمة المعكوسة** - اقرأ الكلمة المعكوسة\n9. 📂 **فئات** - اذكر شيئاً من الفئة\n10. ⚡ **أول من يكتب** - أسرع رسالة\n\nاستخدم الأمر **/game** لبدء اللعب!",
+            color=0x9B59B6
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    @discord.ui.button(label="🎡 الروليت", style=discord.ButtonStyle.danger, emoji="🎡")
+    async def roulette_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎡 نظام الروليت",
+            description="**أوامر الروليت:**\n\n• **+روليت** - بدء لعبة روليت\n• انضم عبر زر الانضمام\n• اختر ضحيتك في دورك\n\nآخر لاعب يبقى هو الفائز!",
+            color=0xFF6600
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    @discord.ui.button(label="⚙️ الإدارة", style=discord.ButtonStyle.success, emoji="⚙️")
+    async def admin_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="⚙️ أوامر الإدارة",
+            description="**أوامر الإدارة:**\n\n• **/setup_verify** - إعداد نظام التحقق\n• **/setup_welcome** - إعداد رسالة الترحيب\n• **/setup_logs** - إعداد سجل المراقبة\n• **/setup_reports** - إعداد نظام البلاغات\n• **/block_links** - منع الروابط\n• **/member_count** - عداد الأعضاء\n\n**للمزيد من المساعدة، راجع الإدارة.**",
+            color=0x2ECC71
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.command(name="مساعدة")
+async def help_command(ctx):
+    view = HelpView()
+    embed = discord.Embed(
+        title="📚 قائمة المساعدة",
+        description="مرحباً بك في بوت إدارة السيرفر!\n\nاختر أحد الأزرار أدناه لعرض الأوامر المتاحة.",
+        color=0x3498db
+    )
+    embed.add_field(name="🎮 الألعاب", value="10 ألعاب سرعة ممتعة", inline=True)
+    embed.add_field(name="🎡 الروليت", value="لعبة الروليت الجماعية", inline=True)
+    embed.add_field(name="⚙️ الإدارة", value="أوامر إدارة السيرفر", inline=True)
+    embed.set_footer(text="استخدم /game لبدء الألعاب")
+    await ctx.send(embed=embed, view=view)
+
+# ========== أحداث البوت ==========
+@bot.event
+async def on_ready():
+    print(f"✅ تم تشغيل البوت: {bot.user}")
+    print(f"📊 عدد السيرفرات: {len(bot.guilds)}")
+    
+    try:
+        synced = await bot.tree.sync()
+        print(f"📡 تم مزامنة {len(synced)} أمر")
+    except Exception as e:
+        print(f"❌ خطأ في مزامنة الأوامر: {e}")
+    
+    for guild in bot.guilds:
         await تحديث_الدعوات(guild)
     
-    تحديث_عدد_الأعضاء.start()
+    try:
+        await bot.add_cog(Games(bot))
+        print("✅ تم تحميل نظام الألعاب")
+    except Exception as e:
+        print(f"❌ خطأ في تحميل الألعاب: {e}")
     
-    try:
-        await البوت.tree.sync()
-        print(f"🔄 تم مزامنة الأوامر")
-    except Exception as e:
-        print(f"❌ فشل المزامنة: {e}")
+    print("✅ البوت جاهز للعمل!")
 
-@البوت.event
-async def on_member_join(member):
-    try:
-        invites_before = دعوات_السيرفرات.get(member.guild.id, {})
-        invites_after = {inv.code: inv.uses for inv in await member.guild.invites()}
-        
-        inviter = None
-        for code, uses in invites_after.items():
-            if code in invites_before and uses > invites_before[code]:
-                inviter = code
-                break
-        
-        if inviter:
-            async with aiosqlite.connect("server_data.db") as db:
-                cursor = await db.execute("SELECT welcome_channel FROM server_config WHERE guild_id = ?", (str(member.guild.id),))
-                row = await cursor.fetchone()
-            
-            if row and row[0]:
-                channel = member.guild.get_channel(int(row[0]))
-                if channel:
-                    invite = await member.guild.fetch_invite(inviter)
-                    if invite and invite.inviter:
-                        inviter_name = invite.inviter.display_name
-                        بيانات_الدعوات[invite.inviter.id] = بيانات_الدعوات.get(invite.inviter.id, 0) + 1
-                        total_invites = بيانات_الدعوات[invite.inviter.id]
-                        
-                        embed = discord.Embed(title="🎉 عضو جديد!", description=f"مرحباً {member.mention} في السيرفر!", color=0x00FF00, timestamp=datetime.now())
-                        embed.add_field(name="👤 تمت الدعوة بواسطة", value=inviter_name, inline=True)
-                        embed.add_field(name="📊 عدد الدعوات", value=str(total_invites), inline=True)
-                        await channel.send(embed=embed)
-        
-        دعوات_السيرفرات[member.guild.id] = {inv.code: inv.uses for inv in await member.guild.invites()}
-    except Exception as e:
-        print(f"خطأ في الترحيب: {e}")
-
-@البوت.event
+@bot.event
 async def on_guild_join(guild):
     await تحديث_الدعوات(guild)
+    print(f"📥 انضم إلى سيرفر: {guild.name}")
 
-@البوت.event
+@bot.event
+async def on_guild_remove(guild):
+    if guild.id in دعوات_السيرفرات:
+        del دعوات_السيرفرات[guild.id]
+    print(f"📤 غادر سيرفر: {guild.name}")
+
+@bot.event
+async def on_invite_create(invite):
+    await تحديث_الدعوات(invite.guild)
+
+@bot.event
+async def on_invite_delete(invite):
+    await تحديث_الدعوات(invite.guild)
+
+@bot.event
+async def on_member_join(member):
+    guild = member.guild
+    
+    await تحديث_الدعوات(guild)
+    
+    try:
+        async with aiosqlite.connect("server_data.db") as db:
+            today = datetime.now().strftime("%Y-%m-%d")
+            await db.execute("INSERT INTO member_join_log (guild_id, date, count) VALUES (?, ?, 1) ON CONFLICT(guild_id, date) DO UPDATE SET count = count + 1",
+                            (str(guild.id), today))
+            await db.commit()
+    except Exception as e:
+        print(f"خطأ في تسجيل انضمام العضو: {e}")
+    
+    try:
+        async with aiosqlite.connect("server_data.db") as db:
+            cursor = await db.execute("SELECT welcome_channel FROM server_config WHERE guild_id = ?", (str(guild.id),))
+            result = await cursor.fetchone()
+            if result and result[0]:
+                channel = guild.get_channel(int(result[0]))
+                if channel:
+                    await channel.send(f"👋 مرحباً {member.mention} في سيرفر {guild.name}!")
+    except Exception as e:
+        print(f"خطأ في رسالة الترحيب: {e}")
+
+@bot.event
+async def on_member_remove(member):
+    guild = member.guild
+    await تحديث_الدعوات(guild)
+
+@bot.event
 async def on_message(message):
     if message.author.bot:
         return
     
     await تسجيل_نشاط_القناة(message.guild.id, message.channel.id)
     
+    await bot.process_commands(message)
+
+@bot.event
+async def on_interaction(interaction):
+    pass
+
+# ========== أوامر البوت ==========
+@bot.command(name="روليت")
+async def roulette_command(ctx):
+    roulette_game = RouletteGame(bot)
+    await roulette_game.start_game(ctx, is_slash=False)
+
+@bot.tree.command(name="roulette", description="بدء لعبة الروليت")
+async def roulette_slash(interaction: discord.Interaction):
+    roulette_game = RouletteGame(bot)
+    await roulette_game.start_game(interaction, is_slash=True)
+
+@bot.tree.command(name="setup_verify", description="إعداد نظام التحقق")
+@app_commands.describe(role="رتبة التحقق", channel="قناة التحقق")
+@app_commands.default_permissions(administrator=True)
+async def setup_verify(interaction: discord.Interaction, role: discord.Role, channel: discord.TextChannel):
     async with aiosqlite.connect("server_data.db") as db:
-        cursor = await db.execute("SELECT block_links FROM server_config WHERE guild_id = ?", (str(message.guild.id),))
-        row = await cursor.fetchone()
+        await db.execute("INSERT OR REPLACE INTO server_config (guild_id, verify_role, verify_channel) VALUES (?, ?, ?)",
+                        (str(interaction.guild_id), str(role.id), str(channel.id)))
+        await db.commit()
     
-    if row and row[0] == 1:
-        if "discord.gg" in message.content.lower() or "discord.com/invite" in message.content.lower():
-            await message.delete()
-            await message.channel.send(f"{message.author.mention} يمنع نشر روابط الدعوات!", delete_after=5)
-            return
+    view = VerifyView(role.id)
+    embed = discord.Embed(
+        title="✅ نظام التحقق",
+        description=f"اضغط على الزر أدناه للتحقق والحصول على رتبة {role.mention}",
+        color=0x00FF00
+    )
+    await channel.send(embed=embed, view=view)
+    await create_embed(interaction, description=f"✅ تم إعداد نظام التحقق في {channel.mention} مع رتبة {role.mention}", color=0x00FF00, is_ephemeral=True)
+
+@bot.tree.command(name="setup_welcome", description="إعداد قناة الترحيب")
+@app_commands.describe(channel="قناة الترحيب")
+@app_commands.default_permissions(administrator=True)
+async def setup_welcome(interaction: discord.Interaction, channel: discord.TextChannel):
+    async with aiosqlite.connect("server_data.db") as db:
+        await db.execute("INSERT INTO server_config (guild_id, welcome_channel) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET welcome_channel = ?",
+                        (str(interaction.guild_id), str(channel.id), str(channel.id)))
+        await db.commit()
+    await create_embed(interaction, description=f"✅ تم إعداد قناة الترحيب: {channel.mention}", color=0x00FF00, is_ephemeral=True)
+
+@bot.tree.command(name="setup_logs", description="إعداد قناة السجلات")
+@app_commands.describe(channel="قناة السجلات")
+@app_commands.default_permissions(administrator=True)
+async def setup_logs(interaction: discord.Interaction, channel: discord.TextChannel):
+    async with aiosqlite.connect("server_data.db") as db:
+        await db.execute("INSERT INTO server_config (guild_id, logs_channel) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET logs_channel = ?",
+                        (str(interaction.guild_id), str(channel.id), str(channel.id)))
+        await db.commit()
+    await create_embed(interaction, description=f"✅ تم إعداد قناة السجلات: {channel.mention}", color=0x00FF00, is_ephemeral=True)
+
+@bot.tree.command(name="setup_reports", description="إعداد قناة البلاغات")
+@app_commands.describe(channel="قناة البلاغات")
+@app_commands.default_permissions(administrator=True)
+async def setup_reports(interaction: discord.Interaction, channel: discord.TextChannel):
+    async with aiosqlite.connect("server_data.db") as db:
+        await db.execute("INSERT INTO server_config (guild_id, report_channel) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET report_channel = ?",
+                        (str(interaction.guild_id), str(channel.id), str(channel.id)))
+        await db.commit()
+    await create_embed(interaction, description=f"✅ تم إعداد قناة البلاغات: {channel.mention}", color=0x00FF00, is_ephemeral=True)
+
+@bot.tree.command(name="block_links", description="تشغيل/إيقاف منع الروابط")
+@app_commands.describe(status="حالة منع الروابط")
+@app_commands.choices(status=[app_commands.Choice(name="تشغيل", value="1"), app_commands.Choice(name="إيقاف", value="0")])
+@app_commands.default_permissions(administrator=True)
+async def block_links(interaction: discord.Interaction, status: str):
+    async with aiosqlite.connect("server_data.db") as db:
+        await db.execute("INSERT INTO server_config (guild_id, block_links) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET block_links = ?",
+                        (str(interaction.guild_id), int(status), int(status)))
+        await db.commit()
+    state = "تشغيل" if status == "1" else "إيقاف"
+    await create_embed(interaction, description=f"✅ تم {state} منع الروابط", color=0x00FF00, is_ephemeral=True)
+
+@bot.tree.command(name="member_count", description="إعداد عداد الأعضاء")
+@app_commands.describe(channel="قناة عداد الأعضاء")
+@app_commands.default_permissions(administrator=True)
+async def member_count(interaction: discord.Interaction, channel: discord.VoiceChannel):
+    async with aiosqlite.connect("server_data.db") as db:
+        await db.execute("INSERT INTO server_config (guild_id, member_count_channel) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET member_count_channel = ?",
+                        (str(interaction.guild_id), str(channel.id), str(channel.id)))
+        await db.commit()
     
-    if message.content.startswith("+brq"):
-        if message.author.guild_permissions.administrator:
-            roulette_game = RouletteGame(البوت)
-            await roulette_game.start_game(message, is_slash=False)
-        else:
-            await message.channel.send("❌ هذه اللعبة مخصصة للأونر فقط!")
+    member_count_val = len(interaction.guild.members)
+    await channel.edit(name=f"👥 الأعضاء: {member_count_val}")
+    await create_embed(interaction, description=f"✅ تم إعداد عداد الأعضاء في: {channel.mention}", color=0x00FF00, is_ephemeral=True)
+
+@bot.tree.command(name="points", description="عرض نقاط الألعاب الخاصة بك")
+async def points_command(interaction: discord.Interaction):
+    stats = await الحصول_على_نقاط_اللاعب(interaction.guild_id, interaction.user.id)
+    await create_embed(
+        interaction,
+        title="📊 إحصائيات الألعاب",
+        description=f"**{interaction.user.mention}**\n\n🏆 **النقاط:** {stats['points']}\n🎮 **الألعاب التي فاز بها:** {stats['games_won']}",
+        color=0xFFD700,
+        is_ephemeral=True
+    )
+
+@bot.tree.command(name="leaderboard", description="عرض لوحة صدارة الألعاب")
+async def leaderboard_command(interaction: discord.Interaction):
+    async with aiosqlite.connect("server_data.db") as db:
+        cursor = await db.execute("SELECT user_id, points FROM game_points WHERE guild_id = ? ORDER BY points DESC LIMIT 10", (str(interaction.guild_id),))
+        rows = await cursor.fetchall()
+    
+    if not rows:
+        await create_embed(interaction, description="لا توجد بيانات بعد!", color=0xFFA500, is_ephemeral=True)
         return
     
-    await البوت.process_commands(message)
-
-@البوت.tree.command(name="اعدادات", description="إعداد البوت في السيرفر")
-@app_commands.describe(
-    verify_role="رتبة التحقق",
-    verify_channel="قناة التحقق",
-    welcome_channel="قناة الترحيب",
-    logs_channel="قناة السجلات",
-    report_channel="قناة التقارير اليومية",
-    member_count_channel="قناة عدد الأعضاء"
-)
-async def اعدادات(interaction: discord.Interaction, verify_role: discord.Role = None, verify_channel: discord.TextChannel = None, welcome_channel: discord.TextChannel = None, logs_channel: discord.TextChannel = None, report_channel: discord.TextChannel = None, member_count_channel: discord.TextChannel = None):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
-            return
-        
-        async with aiosqlite.connect("server_data.db") as db:
-            await db.execute("INSERT OR REPLACE INTO server_config (guild_id, verify_role, verify_channel, welcome_channel, logs_channel, report_channel, member_count_channel) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (str(interaction.guild_id), str(verify_role.id) if verify_role else None, str(verify_channel.id) if verify_channel else None, str(welcome_channel.id) if welcome_channel else None, str(logs_channel.id) if logs_channel else None, str(report_channel.id) if report_channel else None, str(member_count_channel.id) if member_count_channel else None))
-            await db.commit()
-        
-        embed = discord.Embed(title="✅ تم إعداد البوت بنجاح!", color=0x00FF00)
-        if verify_role:
-            embed.add_field(name="🔐 رتبة التحقق", value=verify_role.mention, inline=True)
-        if verify_channel:
-            embed.add_field(name="📢 قناة التحقق", value=verify_channel.mention, inline=True)
-        if welcome_channel:
-            embed.add_field(name="🎉 قناة الترحيب", value=welcome_channel.mention, inline=True)
-        if logs_channel:
-            embed.add_field(name="📋 قناة السجلات", value=logs_channel.mention, inline=True)
-        if report_channel:
-            embed.add_field(name="📊 قناة التقارير", value=report_channel.mention, inline=True)
-        if member_count_channel:
-            embed.add_field(name="👥 قناة عدد الأعضاء", value=member_count_channel.mention, inline=True)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-        if verify_channel and verify_role:
-            embed = discord.Embed(title="🔐 التحقق من السيرفر", description="اضغط على الزر أدناه للتحقق والدخول إلى السيرفر", color=0x5865F2)
-            view = VerifyView(verify_role.id)
-            await verify_channel.send(embed=embed, view=view)
+    leaderboard_text = ""
+    for i, row in enumerate(rows):
+        user = interaction.guild.get_member(int(row[0]))
+        user_name = user.display_name if user else "غير معروف"
+        leaderboard_text += f"{i+1}. {user_name} - {row[1]} نقطة\n"
     
-    except Exception as e:
-        print(f"خطأ في الإعدادات: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
+    await create_embed(
+        interaction,
+        title="🏆 لوحة صدارة الألعاب",
+        description=leaderboard_text,
+        color=0xFFD700,
+        is_ephemeral=True
+    )
 
-@البوت.tree.command(name="تحقق", description="إرسال رسالة التحقق في القناة الحالية")
-async def تحقق(interaction: discord.Interaction):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
-            return
-        
-        async with aiosqlite.connect("server_data.db") as db:
-            cursor = await db.execute("SELECT verify_role FROM server_config WHERE guild_id = ?", (str(interaction.guild_id),))
-            row = await cursor.fetchone()
-        
-        if not row or not row[0]:
-            await interaction.response.send_message("❌ لم يتم تعيين رتبة التحقق! استخدم `/اعدادات` أولاً.", ephemeral=True)
-            return
-        
-        role_id = int(row[0])
-        embed = discord.Embed(title="🔐 التحقق من السيرفر", description="اضغط على الزر أدناه للتحقق والدخول إلى السيرفر", color=0x5865F2)
-        view = VerifyView(role_id)
-        await interaction.channel.send(embed=embed, view=view)
-        await interaction.response.send_message("✅ تم إرسال رسالة التحقق!", ephemeral=True)
-    
-    except Exception as e:
-        print(f"خطأ في التحقق: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="تقرير_يومي", description="عرض التقرير اليومي لنشاط السيرفر")
-async def تقرير_يومي(interaction: discord.Interaction):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
-            return
-        
-        today = datetime.now().strftime("%Y-%m-%d")
-        async with aiosqlite.connect("server_data.db") as db:
-            cursor = await db.execute("SELECT count FROM member_join_log WHERE guild_id = ? AND date = ?", (str(interaction.guild_id), today))
-            row = await cursor.fetchone()
-            new_members = row[0] if row else 0
-        
-        embed = discord.Embed(title="📊 التقرير اليومي", color=0x00AAFF, timestamp=datetime.now())
-        embed.add_field(name="👥 إجمالي الأعضاء", value=str(interaction.guild.member_count), inline=True)
-        embed.add_field(name="🆕 الأعضاء الجدد اليوم", value=str(new_members), inline=True)
-        embed.add_field(name="💬 القنوات النصية", value=str(len(interaction.guild.text_channels)), inline=True)
-        embed.add_field(name="🔊 القنوات الصوتية", value=str(len(interaction.guild.voice_channels)), inline=True)
-        embed.add_field(name="👑 عدد الرتب", value=str(len(interaction.guild.roles)), inline=True)
-        embed.add_field(name="📅 التاريخ", value=today, inline=True)
-        
-        await interaction.response.send_message(embed=embed)
-    
-    except Exception as e:
-        print(f"خطأ في التقرير اليومي: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="شكوى", description="إرسال شكوى مجهولة للإدارة")
-async def شكوى(interaction: discord.Interaction):
-    try:
-        view = ComplaintsView()
-        embed = discord.Embed(title="📝 نظام الشكاوى المجهولة", description="اضغط على الزر أدناه لتقديم شكوى", color=0xFF6600)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-    
-    except Exception as e:
-        print(f"خطأ في الشكوى: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="حظر_الروابط", description="تفعيل أو تعطيل حظر روابط الدعوات")
-async def حظر_الروابط(interaction: discord.Interaction, تفعيل: bool):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
-            return
-        
-        async with aiosqlite.connect("server_data.db") as db:
-            await db.execute("UPDATE server_config SET block_links = ? WHERE guild_id = ?", (1 if تفعيل else 0, str(interaction.guild_id)))
-            await db.commit()
-        
-        status = "مفعل" if تفعيل else "معطل"
-        await interaction.response.send_message(f"✅ تم {status} حظر روابط الدعوات!", ephemeral=True)
-    
-    except Exception as e:
-        print(f"خطأ في حظر الروابط: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="تضمين", description="إنشاء رسالة Embed مخصصة")
-async def تضمين(interaction: discord.Interaction):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
-            return
-        modal = EmbedBuilderModal()
-        await interaction.response.send_modal(modal)
-    
-    except Exception as e:
-        print(f"خطأ في التضمين: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="تعديل_تضمين", description="تعديل رسالة Embed موجودة")
-async def تعديل_تضمين(interaction: discord.Interaction, message_id: str):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
-            return
-        
-        msg = await interaction.channel.fetch_message(int(message_id))
-        if not msg.embeds:
-            await interaction.response.send_message("❌ هذه الرسالة ليست Embed!", ephemeral=True)
-            return
-        
-        view = EmbedEditView(msg, msg.embeds[0])
-        await interaction.response.send_message("✅ اختر الإجراء المطلوب:", view=view, ephemeral=True)
-    
-    except Exception as e:
-        print(f"خطأ في تعديل التضمين: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="معدل_النمو", description="عرض إحصائيات نمو الأعضاء")
-async def معدل_النمو(interaction: discord.Interaction):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
-            return
-        
-        async with aiosqlite.connect("server_data.db") as db:
-            cursor = await db.execute("SELECT date, count FROM member_join_log WHERE guild_id = ? ORDER BY date DESC LIMIT 7", (str(interaction.guild_id),))
-            rows = await cursor.fetchall()
-        
-        total_new = sum(row[1] for row in rows) if rows else 0
-        avg_daily = total_new // 7 if rows else 0
-        
-        embed = discord.Embed(title="📈 معدل النمو", color=0x00AAFF, timestamp=datetime.now())
-        embed.add_field(name="👥 إجمالي الأعضاء", value=str(interaction.guild.member_count), inline=True)
-        embed.add_field(name="🆕 الأعضاء الجدد (7 أيام)", value=str(total_new), inline=True)
-        embed.add_field(name="📊 المتوسط اليومي", value=str(avg_daily), inline=True)
-        embed.add_field(name="📈 نسبة النمو", value="+2.5%" if total_new > 0 else "0%", inline=True)
-        
-        await interaction.response.send_message(embed=embed)
-    
-    except Exception as e:
-        print(f"خطأ في معدل النمو: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="قنوات_ميتة", description="عرض القنوات غير النشطة منذ 7 أيام")
-async def قنوات_ميتة(interaction: discord.Interaction):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
-            return
-        
-        seven_days_ago = int(time.time()) - (7 * 24 * 3600)
-        inactive_channels = []
-        
-        async with aiosqlite.connect("server_data.db") as db:
-            for channel in interaction.guild.text_channels:
-                cursor = await db.execute("SELECT last_message FROM channel_activity WHERE guild_id = ? AND channel_id = ?", (str(interaction.guild_id), str(channel.id)))
-                row = await cursor.fetchone()
-                if not row or row[0] < seven_days_ago:
-                    inactive_channels.append(channel.mention)
-        
-        embed = discord.Embed(title="💀 القنوات الميتة", description="القنوات التي لم يتفاعل فيها أحد منذ 7 أيام", color=0xFF0000)
-        if inactive_channels:
-            embed.description = "\n".join(inactive_channels[:25])
-        else:
-            embed.description = "لا توجد قنوات ميتة"
-        embed.add_field(name="📊 المجموع", value=str(len(inactive_channels)), inline=True)
-        
-        await interaction.response.send_message(embed=embed)
-    
-    except Exception as e:
-        print(f"خطأ في القنوات الميتة: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="ذروة_النشاط", description="عرض أفضل أوقات النشاط في السيرفر")
-async def ذروة_النشاط(interaction: discord.Interaction):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
-            return
-        
-        embed = discord.Embed(title="⏰ تحليل أوقات الذروة", color=0x9B59B6, timestamp=datetime.now())
-        embed.add_field(name="🥇 8:00 م - 10:00 م", value="نشاط مرتفع جداً", inline=False)
-        embed.add_field(name="🥈 4:00 م - 6:00 م", value="نشاط مرتفع", inline=False)
-        embed.add_field(name="🥉 12:00 م - 2:00 م", value="نشاط متوسط", inline=False)
-        embed.set_footer(text="بناءً على نشاط الأيام السبعة الماضية")
-        
-        await interaction.response.send_message(embed=embed)
-    
-    except Exception as e:
-        print(f"خطأ في ذروة النشاط: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="تقييم_المشرفين", description="تقييم فريق المشرفين (مجهول)")
-async def تقييم_المشرفين(interaction: discord.Interaction):
-    try:
-        embed = discord.Embed(title="📊 استبيان تقييم المشرفين", description="كيف تقيم أداء فريق المشرفين في السيرفر؟", color=0x5865F2)
-        view = StaffRatingView()
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-    
-    except Exception as e:
-        print(f"خطأ في تقييم المشرفين: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="روليت", description="بدء لعبة الروليت (للأونر فقط)")
-async def روليت(interaction: discord.Interaction):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذه اللعبة مخصصة للأونر فقط!", ephemeral=True)
-            return
-        
-        roulette_game = RouletteGame(البوت)
-        await roulette_game.start_game(interaction, is_slash=True)
-    
-    except Exception as e:
-        print(f"خطأ في الروليت: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="سجل_الروليت", description="عرض سجل لعبة الروليت")
-async def سجل_الروليت(interaction: discord.Interaction):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
-            return
-        
-        async with aiosqlite.connect("server_data.db") as db:
-            cursor = await db.execute("SELECT user_name, result, created_at FROM roulette_history WHERE guild_id = ? ORDER BY created_at DESC LIMIT 10", (str(interaction.guild_id),))
-            rows = await cursor.fetchall()
-        
-        if not rows:
-            await interaction.response.send_message("لا يوجد سجل للروليت بعد!", ephemeral=True)
-            return
-        
-        desc = ""
-        for row in rows:
-            user_name, result, created_at = row
-            date = datetime.fromtimestamp(created_at).strftime("%Y-%m-%d %H:%M")
-            desc += f"• **{user_name}** - {result} ({date})\n"
-        
-        embed = discord.Embed(title="📋 سجل الروليت", description=desc, color=0x9B59B6)
-        await interaction.response.send_message(embed=embed)
-    
-    except Exception as e:
-        print(f"خطأ في سجل الروليت: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="أعضاء_الرتبة", description="عرض جميع أعضاء رتبة معينة")
-async def أعضاء_الرتبة(interaction: discord.Interaction, الرتبة: discord.Role):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ هذا الأمر مخصص للأونر فقط!", ephemeral=True)
-            return
-        
-        members = await الحصول_على_أعضاء_الرتبة(interaction.guild, الرتبة)
-        
-        if not members:
-            await interaction.response.send_message(f"❌ لا يوجد أعضاء في رتبة {الرتبة.mention}", ephemeral=True)
-            return
-        
-        start = 0
-        end = 10
-        page_members = members[start:end]
-        
-        embed = discord.Embed(
-            title=f"👥 أعضاء رتبة {الرتبة.name}",
-            description=f"إجمالي الأعضاء: {len(members)}",
-            color=الرتبة.color if الرتبة.color.value else 0x5865F2
-        )
-        
-        for member in page_members:
-            embed.add_field(
-                name=member.display_name,
-                value=f"<@{member.id}>\n🆔 {member.id}",
-                inline=False
-            )
-        
-        if len(members) > 10:
-            embed.set_footer(text="استخدم الأزرار للتنقل بين الصفحات | الصفحة 1")
-            view = RoleMembersView(members, الرتبة.name, 0)
-            await interaction.response.send_message(embed=embed, view=view)
-        else:
-            await interaction.response.send_message(embed=embed)
-    
-    except Exception as e:
-        print(f"خطأ في أعضاء الرتبة: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="دعواتي", description="عدد الدعوات التي قمت بها")
-async def دعواتي(interaction: discord.Interaction):
-    try:
-        count = await الحصول_على_عدد_الدعوات(interaction.user.id)
-        embed = discord.Embed(title=f"📊 عدد دعوات {interaction.user.display_name}", color=0x00FF00)
-        embed.add_field(name="🎫 إجمالي الدعوات", value=str(count), inline=True)
-        await interaction.response.send_message(embed=embed)
-    
-    except Exception as e:
-        print(f"خطأ في الدعوات: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="ترتيب_الدعوات", description="ترتيب أكثر من قام بدعوة أعضاء")
-async def ترتيب_الدعوات(interaction: discord.Interaction):
-    try:
-        sorted_invites = await الحصول_على_جميع_الدعوات()
-        sorted_invites = sorted_invites[:10]
-        if not sorted_invites:
-            await interaction.response.send_message("لا توجد دعوات بعد", ephemeral=True)
-            return
-        
-        desc = ""
-        for i, (uid, count) in enumerate(sorted_invites):
-            user = await البوت.fetch_user(int(uid))
-            name = user.display_name if user else "مجهول"
-            desc += f"{i+1}. **{name}** — {count} دعوة\n"
-        
-        embed = discord.Embed(title="🏆 قائمة الأكثر دعوة", description=desc, color=0xFFD700)
-        await interaction.response.send_message(embed=embed)
-    
-    except Exception as e:
-        print(f"خطأ في ترتيب الدعوات: {e}")
-        await interaction.response.send_message(f"❌ حدث خطأ: {str(e)}", ephemeral=True)
-
-@البوت.tree.command(name="مساعدة", description="عرض جميع الأوامر")
-async def مساعدة(interaction: discord.Interaction):
-    embed = discord.Embed(title="🤖 قائمة أوامر البوت - الإصدار 2.7", color=0x5865F2)
-    embed.add_field(name="🔐 التحقق والإعدادات", value="`/اعدادات` `/تحقق`", inline=False)
-    embed.add_field(name="📊 التقارير والإحصائيات", value="`/تقرير_يومي` `/معدل_النمو` `/ذروة_النشاط` `/قنوات_ميتة`", inline=False)
-    embed.add_field(name="📝 الشكاوى والتقييم", value="`/شكوى` `/تقييم_المشرفين`", inline=False)
-    embed.add_field(name="🛡️ الحماية", value="`/حظر_الروابط`", inline=False)
-    embed.add_field(name="🎨 الرسائل المخصصة", value="`/تضمين` `/تعديل_تضمين`", inline=False)
-    embed.add_field(name="🎲 ألعاب الروليت (للأونر فقط)", value="`/روليت` `/سجل_الروليت`", inline=False)
-    embed.add_field(name="👥 إدارة الأعضاء", value="`/أعضاء_الرتبة`", inline=False)
-    embed.add_field(name="👥 تتبع الدعوات", value="`/دعواتي` `/ترتيب_الدعوات`", inline=False)
-    embed.add_field(name="⚡ الاختصارات", value="`+brq` - بدء لعبة الروليت بسرعة", inline=False)
-    embed.set_footer(text="تم التطوير بواسطة taim | الإصدار 2.7")
-    await interaction.response.send_message(embed=embed)
-
+# ========== تشغيل البوت ==========
 if __name__ == "__main__":
-    خيط_الويب = threading.Thread(target=تشغيل_الخادم)
-    خيط_الويب.daemon = True
-    خيط_الويب.start()
+    threading.Thread(target=تشغيل_الخادم, daemon=True).start()
+    asyncio.run(init_db())
     try:
-        البوت.run(التوكن)
+        bot.run(التوكن)
     except Exception as e:
-        print(f"❌ خطأ: {e}")
-        traceback.print_exc()
+        print(f"❌ خطأ في تشغيل البوت: {e}")
+        sys.exit(1)
