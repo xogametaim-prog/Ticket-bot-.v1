@@ -137,6 +137,7 @@ class Management(commands.Cog):
             if row: await message.reply(row[0], mention_author=False)
         except: pass
 
+    # ========== أوامر سلاش ==========
     @app_commands.command(name="set_welcome", description="تحديد قناة الترحيب")
     @app_commands.describe(channel="قناة الترحيب")
     @app_commands.default_permissions(administrator=True)
@@ -149,7 +150,7 @@ class Management(commands.Cog):
             await interaction.followup.send(embed=EmbedHelper.create(description=f"✅ تم تعيين {channel.mention} كقناة ترحيب!", color=0x00FF00), ephemeral=True)
         except Exception as e:
             logger.error(f"❌ set_welcome: {e}")
-            await interaction.followup.send(embed=EmbedHelper.create(description="❌ حدث خطأ!", color=0xFF0000), ephemeral=True)
+            await interaction.followup.send(embed=EmbedHelper.create(description="❌ حدث خطأ داخلي!", color=0xFF0000), ephemeral=True)
 
     @app_commands.command(name="اضافة_اختصار", description="إضافة رد تلقائي")
     @app_commands.describe(trigger="الكلمة المفتاحية", response="الرد")
@@ -163,7 +164,7 @@ class Management(commands.Cog):
             await interaction.followup.send(embed=EmbedHelper.create(description=f"✅ تم إضافة: `{trigger}`", color=0x00FF00), ephemeral=True)
         except Exception as e:
             logger.error(f"❌ add_response: {e}")
-            await interaction.followup.send(embed=EmbedHelper.create(description="❌ حدث خطأ!", color=0xFF0000), ephemeral=True)
+            await interaction.followup.send(embed=EmbedHelper.create(description="❌ حدث خطأ داخلي!", color=0xFF0000), ephemeral=True)
 
     @app_commands.command(name="حذف_اختصار", description="حذف رد تلقائي")
     @app_commands.describe(trigger="الكلمة المفتاحية")
@@ -177,7 +178,7 @@ class Management(commands.Cog):
             await interaction.followup.send(embed=EmbedHelper.create(description=f"✅ تم حذف: `{trigger}`", color=0x00FF00), ephemeral=True)
         except Exception as e:
             logger.error(f"❌ remove_response: {e}")
-            await interaction.followup.send(embed=EmbedHelper.create(description="❌ حدث خطأ!", color=0xFF0000), ephemeral=True)
+            await interaction.followup.send(embed=EmbedHelper.create(description="❌ حدث خطأ داخلي!", color=0xFF0000), ephemeral=True)
 
     @app_commands.command(name="الاختصارات", description="عرض جميع الاختصارات")
     async def list_responses(self, interaction: discord.Interaction):
