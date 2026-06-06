@@ -1,81 +1,90 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const express = require("express");
+const {
+Client,
+GatewayIntentBits,
+Partials
+} = require("discord.js");
 
-const genAI = new GoogleGenerativeAI(process.env.AI_KEY);
+const { generateAIResponse } = require("./gemini");
 
-const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash"
-});
-
-// ذاكرة مؤقتة داخل الرام
-const memory = new Map();
-
-// عدد الرسائل المحفوظة لكل مستخدم
-const MAX_HISTORY = 12;
-
-async function generateAIResponse(userId, userMessage) {
-    try {
-        if (!process.env.AI_KEY) {
-            throw new Error("AI_KEY is missing");
-        }
-
-        // إنشاء سجل للمستخدم إذا لم يكن موجوداً
-        if (!memory.has(userId)) {
-            memory.set(userId, []);
-        }
-
-        const history = memory.get(userId);
-
-        // بناء السياق
-        let context = "";
-
-        if (history.length > 0) {
-            context =
-                "هذه هي المحادثة السابقة بين المستخدم والمساعد:\n\n";
-
-            for (const msg of history) {
-                context += `${msg.role}: ${msg.content}\n`;
-            }
-
-            context += "\n";
-        }
-
-        context += `user: ${userMessage}\nassistant:`;
-
-        // إرسال الطلب إلى Gemini
-        const result = await model.generateContent(context);
-
-        const response =
-            result.response.text()?.trim() ||
-            "لم أتمكن من إنشاء رد حالياً.";
-
-        // حفظ رسالة المستخدم
-        history.push({
-            role: "user",
-            content: userMessage
-        });
-
-        // حفظ رد البوت
-        history.push({
-            role: "assistant",
-            content: response
-        });
-
-        // الاحتفاظ بآخر 12 رسالة فقط
-        if (history.length > MAX_HISTORY) {
-            history.splice(0, history.length - MAX_HISTORY);
-        }
-
-        memory.set(userId, history);
-
-        return response;
-
-    } catch (error) {
-        console.error("Gemini Error:", error);
-
-        return "⚠️ حصلت مشكلة في الاتصال بالذكاء الاصطناعي، تأكد من صحة الـ AI_KEY داخل Render يا غالي!";
-    }
+if (!process.env.DISCORD_TOKEN) {
+throw new Error("DISCORD_TOKEN is missing");
 }
 
-module.exports = {
-    generateAIResponse
-};
+if (!process.env.AI_KEY) {
+throw new Error("AI_KEY is missing");
+}
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+res.send("Bot is online!");
+});
+
+app.listen(PORT, () => {
+console.log("Web server running on port ${PORT}");
+});
+
+const client = new Client({
+intents: [
+GatewayIntentBits.Guilds,
+GatewayIntentBits.GuildMessages,
+GatewayIntentBits.MessageContent
+],
+partials: [Partials.Channel]
+});
+
+client.once("clientReady", () => {
+console.log("Logged in as ${client.user.tag}");
+});
+
+client.on("messageCreate", async (message) => {
+try {
+if (message.author.bot) return;
+
+    const isMentioned = message.mentions.has(client.user);
+    const isAiRoom = message.channel.name === "ai-chat";
+
+    if (!isMentioned && !isAiRoom) return;
+
+    await message.channel.sendTyping();
+
+    let prompt = message.content;
+
+    if (isMentioned) {
+        prompt = prompt.replace(
+            new RegExp(`<@!?${client.user.id}>`, "g"),
+            ""
+        ).trim();
+    }
+
+    if (!prompt) {
+        return message.reply(
+            "اكتب سؤالك بعد منشن البوت 🤖"
+        );
+    }
+
+    const response = await generateAIResponse(
+        message.author.id,
+        prompt
+    );
+
+    const finalResponse =
+        response.length > 1900
+            ? response.slice(0, 1900) + "..."
+            : response;
+
+    await message.reply(finalResponse);
+
+} catch (error) {
+    console.error(error);
+
+    await message.reply(
+        "⚠️ حدث خطأ أثناء معالجة الطلب."
+    );
+}
+
+});
+
+client.login(process.env.DISCORD_TOKEN);
