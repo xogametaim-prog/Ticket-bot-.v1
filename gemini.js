@@ -14,39 +14,35 @@ const aiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
 const memoryPath = path.join(__dirname, 'memory.json');
 
-// دالة لقراءة الذاكرة من الملف
 function loadMemory() {
   try {
     if (fs.existsSync(memoryPath)) {
-      return JSON.parse(fs.readFileSync(memoryPath, 'utf8'));
+      const data = fs.readFileSync(memoryPath, 'utf8');
+      return JSON.parse(data);
     }
   } catch (e) {
-    console.error('Error reading memory file:', e);
+    console.error('❌ Error reading memory:', e.message);
   }
   return {};
 }
 
-// دالة لحفظ الذاكرة في الملف
 function saveMemory(memory) {
   try {
     fs.writeFileSync(memoryPath, JSON.stringify(memory, null, 2), 'utf8');
   } catch (e) {
-    console.error('Error writing to memory file:', e);
+    console.error('❌ Error saving memory:', e.message);
   }
 }
 
 async function getAIResponseWithMemory(userId, userMessage) {
   let memory = loadMemory();
 
-  // إذا كان المستخدم جديداً، ننشئ له سياقاً فارغاً
   if (!memory[userId]) {
     memory[userId] = [];
   }
 
-  // إضافة رسالة المستخدم الحالية للذاكرة الخاصة به
   memory[userId].push({ role: 'user', parts: [{ text: userMessage }] });
 
-  // نحفظ آخر 10 رسائل فقط لكل شخص
   if (memory[userId].length > 10) {
     memory[userId] = memory[userId].slice(-10);
   }
@@ -63,14 +59,12 @@ async function getAIResponseWithMemory(userId, userMessage) {
     const result = await chat.sendMessage(userMessage);
     const responseText = result.response.text();
 
-    // إضافة رد البوت إلى ذاكرة هذا المستخدم
     memory[userId].push({ role: 'model', parts: [{ text: responseText }] });
     saveMemory(memory);
 
     return responseText;
   } catch (error) {
-    console.error(`Gemini Error for user ${userId}:`, error);
-    // نمسح ذاكرة الشخص هذا إذا صار خطأ
+    console.error(`❌ Gemini Error for ${userId}:`, error.message);
     delete memory[userId];
     saveMemory(memory);
 
