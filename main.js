@@ -1,7 +1,7 @@
 // ==================== main.js ====================
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const express = require('express');
-const { getAIResponse } = require('./gemini.js');
+const { getAIResponseWithMemory } = require('./gemini.js');
 
 // ==================== Express Web Server ====================
 const app = express();
@@ -281,7 +281,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    const aiResponse = await getAIResponse(cleanMessage, message.author.id);
+    const aiResponse = await getAIResponseWithMemory(message.author.id, cleanMessage);
     
     if (aiResponse) {
       const chunks = aiResponse.match(/[\s\S]{1,2000}/g) || [];
