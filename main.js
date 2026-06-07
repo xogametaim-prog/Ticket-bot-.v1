@@ -1,8 +1,12 @@
 const express = require("express");
+const sqlite3 = require("sqlite3").verbose();
+
 const {
     Client,
     GatewayIntentBits,
-    Events
+    Events,
+    ActionRowBuilder,
+    StringSelectMenuBuilder
 } = require("discord.js");
 
 const app = express();
@@ -16,10 +20,40 @@ app.listen(PORT, () => {
     console.log(`Web server running on port ${PORT}`);
 });
 
+const db = new sqlite3.Database("./worldcup.db");
+
+db.run(`
+CREATE TABLE IF NOT EXISTS users (
+    userId TEXT PRIMARY KEY,
+    team TEXT NOT NULL
+)
+`);
+
+const teams = [
+    "Argentina",
+    "Brazil",
+    "France",
+    "Spain",
+    "Germany",
+    "England",
+    "Portugal",
+    "Netherlands",
+    "Belgium",
+    "Croatia",
+    "Morocco",
+    "Japan",
+    "South Korea",
+    "Mexico",
+    "USA",
+    "Canada",
+    "Uruguay",
+    "Italy",
+    "Turkey",
+    "Saudi Arabia"
+];
+
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds
-    ]
+    intents: [GatewayIntentBits.Guilds]
 });
 
 client.once(Events.ClientReady, (readyClient) => {
@@ -27,57 +61,115 @@ client.once(Events.ClientReady, (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
 
-    switch (interaction.commandName) {
-        case "worldcup":
-            await interaction.reply(
-                "🏆 كأس العالم 2026 سيقام في الولايات المتحدة وكندا والمكسيك."
-            );
-            break;
+    if (interaction.isChatInputCommand()) {
 
-        case "teams":
-            await interaction.reply(
-                "🌍 سيتم جلب قائمة المنتخبات من API-Football."
-            );
-            break;
+        switch (interaction.commandName) {
 
-        case "schedule":
-            await interaction.reply(
-                "📅 سيتم عرض جدول المباريات من API-Football."
-            );
-            break;
+            case "pick_team":
 
-        case "stadiums":
-            await interaction.reply(
-                "🏟️ سيتم عرض الملاعب المستضيفة."
-            );
-            break;
+                db.get(
+                    "SELECT * FROM users WHERE userId = ?",
+                    [interaction.user.id],
+                    async (err, row) => {
 
-        case "pick_team":
-            await interaction.reply(
-                "⚽ نظام اختيار المنتخب سيتم تفعيله قريبًا."
-            );
-            break;
+                        if (row) {
+                            return interaction.reply({
+                                content: `❌ اخترت منتخبك بالفعل: ${row.team}`,
+                                ephemeral: true
+                            });
+                        }
 
-        case "my_team":
-            await interaction.reply(
-                "📋 سيتم عرض منتخبك المختار."
-            );
-            break;
+                        const menu = new StringSelectMenuBuilder()
+                            .setCustomId("team_select")
+                            .setPlaceholder("اختر منتخبك")
+                            .addOptions(
+                                teams.map(team => ({
+                                    label: team,
+                                    value: team
+                                }))
+                            );
 
-        case "guess_team":
-            await interaction.reply(
-                "🎮 لعبة خمن المنتخب."
-            );
-            break;
+                        const rowMenu = new ActionRowBuilder()
+                            .addComponents(menu);
 
-        case "leaderboard":
-            await interaction.reply(
-                "🏅 لوحة المتصدرين."
-            );
-            break;
+                        await interaction.reply({
+                            content: "⚽ اختر منتخبك المفضل (مرة واحدة فقط)",
+                            components: [rowMenu],
+                            ephemeral: true
+                        });
+                    }
+                );
+
+                break;
+
+            case "my_team":
+
+                db.get(
+                    "SELECT * FROM users WHERE userId = ?",
+                    [interaction.user.id],
+                    async (err, row) => {
+
+                        if (!row) {
+                            return interaction.reply({
+                                content: "❌ لم تختر منتخباً بعد",
+                                ephemeral: true
+                            });
+                        }
+
+                        await interaction.reply({
+                            content: `🏆 منتخبك المختار هو: ${row.team}`
+                        });
+                    }
+                );
+
+                break;
+
+            default:
+
+                await interaction.reply({
+                    content: "🚧 هذا الأمر قيد التطوير."
+                });
+
+        }
+
     }
+
+    if (interaction.isStringSelectMenu()) {
+
+        if (interaction.customId === "team_select") {
+
+            const team = interaction.values[0];
+
+            db.get(
+                "SELECT * FROM users WHERE userId = ?",
+                [interaction.user.id],
+                (err, row) => {
+
+                    if (row) {
+                        return interaction.reply({
+                            content: "❌ لا يمكنك تغيير منتخبك.",
+                            ephemeral: true
+                        });
+                    }
+
+                    db.run(
+                        "INSERT INTO users(userId, team) VALUES(?, ?)",
+                        [interaction.user.id, team]
+                    );
+
+                    interaction.reply({
+                        content: `✅ تم اختيار ${team} بنجاح!`,
+                        ephemeral: true
+                    });
+
+                }
+            );
+
+        }
+
+    }
+
 });
 
 client.login(process.env.DISCORD_TOKEN);
