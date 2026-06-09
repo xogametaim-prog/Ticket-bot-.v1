@@ -8,13 +8,20 @@ const port = process.env.PORT || 10000;
 app.get('/', (req, res) => res.send('World Cup 2026 Bot v1.2 Is Online!'));
 app.listen(port, () => console.log(`Web server listening on port ${port}`));
 
-// 2️⃣ إعداد قاعدة البيانات لحفظ نقاط المتصدرين (Leaderboard)
+// 2️⃣ إعداد قاعدة البيانات لحفظ نقاط المتصدرين وقناة الأخبار
 const db = new Database('leaderboard.db');
 db.prepare(`
     CREATE TABLE IF NOT EXISTS users (
         userId TEXT PRIMARY KEY,
         username TEXT,
         points INTEGER DEFAULT 0
+    )
+`).run();
+
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS config (
+        guildId TEXT PRIMARY KEY,
+        newsChannelId TEXT
     )
 `).run();
 
@@ -44,13 +51,12 @@ const gameData = [
     { countryAr: "كندا", countryEn: "canada", flagUrl: "https://flagcdn.com/w640/ca.png" }
 ];
 
-// 5️⃣ قائمة المجموعات والفرق المشاركة كمثال
 const teamsData = {
     ar: "🏆 **الفرق المشاركة المبرمجة حالياً في المجموعات الأولية:**\n• **المجموعة أ:** المكسيك، كندا، أمريكا\n• **المجموعة ب:** الأرجنتين، فرنسا، البرازيل، المغرب، مصر، السعودية.",
     en: "🏆 **Currently programmed teams in preliminary groups:**\n• **Group A:** Mexico, Canada, USA\n• **Group B:** Argentina, France, Brazil, Morocco, Egypt, Saudi Arabia."
 };
 
-// 6️⃣ تسجيل الأوامر عند تشغيل البوت
+// 5️⃣ تسجيل الأوامر عند تشغيل البوت
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}! Version: ${BOT_VERSION}`);
 
@@ -81,7 +87,17 @@ client.once('ready', async () => {
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
             .addStringOption(opt => opt.setName('title').setDescription('عنوان الرسالة').setRequired(true))
             .addStringOption(opt => opt.setName('description').setDescription('محتوى أو نص الرسالة').setRequired(true))
-            .addStringOption(opt => opt.setName('color').setDescription('اللون بالهكس مثال: #ff0000').setRequired(false))
+            .addStringOption(opt => opt.setName('color').setDescription('اللون بالهكس مثال: #ff0000').setRequired(false)),
+
+        new SlashCommandBuilder()
+            .setName('set-news')
+            .setDescription('تحديد روم نشر أخبار وجدول مباريات كأس العالم (للإدارة فقط)')
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+            .addChannelOption(opt => opt.setName('room').setDescription('اختر الروم المخصص للأخبار').setRequired(true)),
+
+        new SlashCommandBuilder()
+            .setName('info')
+            .setDescription('عرض معلومات البوت الفنية وسرعة الاتصال')
     ].map(cmd => cmd.toJSON());
 
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
@@ -93,7 +109,7 @@ client.once('ready', async () => {
     }
 });
 
-// 7️⃣ دالة تشغيل لعبة التخمين (مفصولة لتشغيلها بالـ Slash وبالاختصار)
+// 6️⃣ دالة تشغيل لعبة التخمين
 async function startFlagGame(channel, replyTarget = null) {
     if (activeGames.has(channel.id)) {
         const msg = '❌ هناك لعبة قائمة بالفعل في هذه القناة!';
@@ -116,7 +132,6 @@ async function startFlagGame(channel, replyTarget = null) {
         await channel.send({ embeds: [gameEmbed] });
     }
 
-    // مجمع الرسائل: يقبل الإجابة سواء كانت بالعربي أو بالإنجليزي (تجاهل حالة الأحرف للإنجليزي)
     const filter = res => {
         const ans = res.content.trim().toLowerCase();
         return ans === chosen.countryAr || ans === chosen.countryEn;
@@ -127,13 +142,13 @@ async function startFlagGame(channel, replyTarget = null) {
 
     collector.on('collect', async m => {
         won = true;
-        
-        // إضافة نقطة للاعب في قاعدة البيانات
         const userId = m.author.id;
         const username = m.author.username;
+        let currentPoints = 1;
         
         const row = db.prepare('SELECT points FROM users WHERE userId = ?').get(userId);
         if (row) {
+            currentPoints = row.points + 1;
             db.prepare('UPDATE users SET points = points + 1, username = ? WHERE userId = ?').run(username, userId);
         } else {
             db.prepare('INSERT INTO users (userId, username, points) VALUES (?, ?, 1)').run(userId, username);
@@ -146,6 +161,19 @@ async function startFlagGame(channel, replyTarget = null) {
             .setThumbnail(chosen.flagUrl);
         
         await channel.send({ embeds: [successEmbed] });
+
+        // ➕ إرسال رسالة في الخاص (DM) تنبيهية للمستخدم
+        try {
+            const dmEmbed = new EmbedBuilder()
+                .setTitle('🥇 تهانينا الفوز في لعبة التخمين!')
+                .setDescription(`أهلاً يا بطل، لقد أجبت إجابة صحيحة على علم دولة (**${chosen.countryAr}**) في سيرفر **${m.guild.name}**.\n\n📊 رصيد نقاطك الحالي أصبح: \`${currentPoints}\` نقطة. استمر في التحدي!`)
+                .setColor(0xF1C40F)
+                .setFooter({ text: `World Cup 2026 Bot • الخاص` });
+            await m.author.send({ embeds: [dmEmbed] });
+        } catch (err) {
+            console.log(`لم يتمكن البوت من إرسال رسالة خاصة لـ ${username} لأن خاص الحساب مغلق.`);
+        }
+
         collector.stop();
     });
 
@@ -162,39 +190,35 @@ async function startFlagGame(channel, replyTarget = null) {
     });
 }
 
-// 8️⃣ استقبال رسائل الشات العادية واختصار اللعبة (.w)
+// 7️⃣ استقبال رسائل الشات العادية واختصار اللعبة (.w)
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
 
-    // اختصار لعبة احزر العلم
     if (message.content.trim().toLowerCase() === '.w') {
         await startFlagGame(message.channel);
     }
 });
 
-// 9️⃣ معالجة أوامر الـ Slash Commands
+// 8️⃣ معالجة أوامر الـ Slash Commands
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    const { commandName, options, channel } = interaction;
+    const { commandName, options, channel, guildId } = interaction;
 
-    // أمر المساعدة بدعم اللغتين
     if (commandName === 'help') {
         await interaction.deferReply();
         const helpEmbed = new EmbedBuilder()
             .setTitle(`📖 قائمة مساعدة ${BOT_NAME}`)
             .setDescription(`مرحباً بك! إليك الأوامر المتاحة في الإصدار ${BOT_VERSION}:`)
             .addFields(
-                { name: '⚽ أوامر كأس العالم', value: '`/teams` - عرض الفرق المشاركة\n`/countdown` - مؤقت الافتتاح التنازلي', inline: true },
+                { name: '⚽ أوامر كأس العالم', value: '`/teams` - عرض الفرق المشاركة\n`/countdown` - مؤقت الافتتاح التنازلي\n`/set-news` - تحديد روم الأخبار للبطولة', inline: true },
                 { name: '🎮 ألعاب وتسلية', value: '`/guess-flag` أو الاختصار `.w` - بدء اللعبة\n`/leaderboard` - قائمة المتصدرين', inline: true },
-                { name: '🛠️ الإدارة', value: '`/embed` - إرسال رسالة إمبد منسقة', inline: false }
+                { name: '🛠️ الإدارة والمعلومات', value: '`/embed` - إرسال رسالة إمبد\n`/info` - عرض معلومات اتصال البوت الفنية', inline: false }
             )
-            .setColor(0x9B59B6)
-            .setFooter({ text: `Requested by ${interaction.user.username}` });
+            .setColor(0x9B59B6);
         await interaction.editReply({ embeds: [helpEmbed] });
     }
 
-    // أمر الأفرقة المشاركة
     if (commandName === 'teams') {
         await interaction.deferReply();
         const teamsEmbed = new EmbedBuilder()
@@ -204,13 +228,11 @@ client.on('interactionCreate', async interaction => {
         await interaction.editReply({ embeds: [teamsEmbed] });
     }
 
-    // أمر بدء لعبة التخمين
     if (commandName === 'guess-flag') {
         await interaction.deferReply();
         await startFlagGame(channel, interaction);
     }
 
-    // أمر العد التنازلي
     if (commandName === 'countdown') {
         await interaction.deferReply();
         const worldCupDate = new Date('2026-06-11T18:00:00Z');
@@ -231,12 +253,10 @@ client.on('interactionCreate', async interaction => {
                 name: '⏳ المتبقي على مباراة الافتتاح في المكسيك:', 
                 value: `**${days}** يوم و **${hours}** ساعة و **${minutes}** دقيقة و **${seconds}** ثانية` 
             })
-            .setColor(0x3498DB)
-            .setFooter({ text: `${BOT_NAME}` });
+            .setColor(0x3498DB);
         await interaction.editReply({ embeds: [cdEmbed] });
     }
 
-    // أمر المتصدرين (Leaderboard)
     if (commandName === 'leaderboard') {
         await interaction.deferReply();
         const rows = db.prepare('SELECT username, points FROM users ORDER BY points DESC LIMIT 10').all();
@@ -262,15 +282,12 @@ client.on('interactionCreate', async interaction => {
         await interaction.editReply({ embeds: [lbEmbed] });
     }
 
-    // أمر إرسال رسائل إمبد (Embed Creator)
     if (commandName === 'embed') {
         await interaction.deferReply({ ephemeral: true });
-        
         const title = options.getString('title');
         const desc = options.getString('description');
         let colorInput = options.getString('color') || '#3498db';
         
-        // تنظيف وحل صيغة اللون ليقبله الديسكورد
         colorInput = colorInput.replace('#', '');
         const finalColor = parseInt(colorInput, 16) || 0x3498DB;
 
@@ -281,9 +298,55 @@ client.on('interactionCreate', async interaction => {
             .setFooter({ text: `${BOT_NAME} • نظام النشر` })
             .setTimestamp();
 
-        // إرسال الإمبد مباشرة في القناة
         await channel.send({ embeds: [customEmbed] });
         await interaction.editReply({ content: '✅ تم إرسال رسالة الإمبد بنجاح!' });
+    }
+
+    // 🏆 أمر تحديد روم الأخبار والمباريات (فكرة 3)
+    if (commandName === 'set-news') {
+        await interaction.deferReply({ ephemeral: true });
+        const targetRoom = options.getChannel('room');
+
+        db.prepare('INSERT INTO config (guildId, newsChannelId) VALUES (?, ?) ON CONFLICT(guildId) DO UPDATE SET newsChannelId = ?').run(interaction.guild.id, targetRoom.id, targetRoom.id);
+
+        const successNewsEmbed = new EmbedBuilder()
+            .setTitle('📢 تم ضبط روم النشر بنجاح!')
+            .setDescription(`روم الأخبار وجدول مباريات كأس العالم الرسمي الحالي هو: ${targetRoom}\nسيتم إرسال كافة التنبيهات والقرعات وجداول المونديال داخل هذا الروم تلقائياً!`)
+            .setColor(0x2ECC71);
+
+        await interaction.editReply({ embeds: [successNewsEmbed] });
+        
+        // إرسال رسالة ترحيبية وتجريبية داخل الروم الذي تم اختياره
+        await targetRoom.send({
+            embeds: [
+                new EmbedBuilder()
+                    .setTitle('⚽ قناة أخبار كأس العالم 2026 المعتمدة')
+                    .setDescription('تم تفعيل هذا الروم بنجاح بواسطة الإدارة لتلقي جداول وتحديثات المونديال اليومية فور انطلاقها!')
+                    .setColor(0x3498DB)
+            ]
+        });
+    }
+
+    // 🛠️ أمر معلومات البوت الفنية الصافي والمعدل (فكرة 4 المحدثة)
+    if (commandName === 'info') {
+        await interaction.deferReply();
+
+        const ping = client.ws.ping; // سرعة اتصال البوت بالميليمتر ثانية
+        const totalServers = client.guilds.cache.size; // عدد السيرفرات
+
+        const infoEmbed = new EmbedBuilder()
+            .setTitle(`🤖 معلومات ${BOT_NAME}`)
+            .setColor(0x2C3E50)
+            .addFields(
+                { name: '💿 الإصدار الحالي (Version):', value: `\`${BOT_VERSION}\``, inline: true },
+                { name: '👑 مطور البوت (Developer):', value: `\`Lead Developer (BRQ & RTR)\``, inline: true },
+                { name: '🌐 إجمالي عدد السيرفرات:', value: `\`${totalServers}\` سيرفر`, inline: false },
+                { name: '⚡ سرعة اتصال البوت (Ping):', value: `\`${ping}ms\``, inline: true }
+            )
+            .setFooter({ text: `${BOT_NAME} • الإحصائيات الفنية` })
+            .setTimestamp();
+
+        await interaction.editReply({ embeds: [infoEmbed] });
     }
 });
 
