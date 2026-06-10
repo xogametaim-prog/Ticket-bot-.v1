@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, PermissionFlagsBits } = require('discord.js');
 const express = require('express');
 const Database = require('better-sqlite3');
+const ms = require('ms'); // تأكد من تثبيته عبر npm i ms أو سنحسب الدقائق يدوياً برمجياً
 
 // 1️⃣ إعداد خادم الويب (Keep-Alive لمنصة Render)
 const app = express();
@@ -46,12 +47,13 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessageReactions
     ]
 });
 
 const BOT_NAME = "World Cup 2026 Bot";
-const BOT_VERSION = "2.0v 🏆 Ultimate Live";
+const BOT_VERSION = "3.0v 🏆 Ultimate Administrator Edition";
 const activeGames = new Set();
 
 // 4️⃣ قواميس البيانات للألعاب التفاعلية (أعلام + لاعبين)
@@ -73,7 +75,7 @@ const playerData = [
     { nameAr: "مبابي", nameEn: "mbappe", hints: ["صاروخ هجوم منتخب فرنسا السريع 🇫🇷", "سجل هاتريك تاريخي في نهائي 2022 ⚽", "ينشط حالياً في الدوري الإسباني"] },
     { nameAr: "حكيمي", nameEn: "hakimi", hints: ["الظهير الطائر النفاثة لمنتخب المغرب 🇲🇦", "ساهم في الإنجاز التاريخي والمركز الرابع عالمياً 🦁", "متخصص في تنفيذ الركلات الحرة الحاسمة"] },
     { nameAr: "صلاح", nameEn: "salah", hints: ["الملك المصري وقائد الفراعنة 🇪🇬", "أحد أفضل الأجنحة الهجومية في تاريخ البريميرليج 🏴󠁧󠁢󠁥󠁮󠁧󠁿", "صاحب السرعات الخارقة والإنهاء المميز"] },
-    { nameAr: "الدوسري", nameEn: "al dawsari", hints: ["التورنيدو ونجم منتخب السعودية 🇸🇦", "سجل هدف الفوز الأسطوري التاريخي ضد الأرجنتين في 2022 🏆", "يتميز بمهاراته الفردية العالية واحتفاليته الشهيرة"] }
+    { nameAr: "الدوسري", nameEn: "al dawsari", hints: ["التورنيدو ونجم منتخب السعودية 🇸🇦", "سجل هدف الفوز الأسطوري التاريخي ضد الأرجنتين في 2022 🏆", "يتميز بمهاراته الفردية العالية وااحتفاليته الشهيرة"] }
 ];
 
 const teamsList = [
@@ -85,7 +87,7 @@ const teamsList = [
     { name: "🏴󠁧󠁢󠁥󠁮󠁧󠁿 إنجلترا", id: "england" }, { name: "🇩🇪 ألمانيا", id: "germany" }
 ];
 
-// 5️⃣ تسجيل وتحديث جميع الـ Slash Commands التفاعلية
+// 5️⃣ تسجيل وتحديث جميع الـ Slash Commands التفاعلية والإدارية
 client.once('ready', async () => {
     console.log(`Logged in successfully as ${client.user.tag}!`);
     console.log(`Current Bot Version: ${BOT_VERSION}`);
@@ -101,7 +103,26 @@ client.once('ready', async () => {
         new SlashCommandBuilder().setName('info').setDescription('معلومات البوت التقنية والمطور وسرعة الاتصال'),
         new SlashCommandBuilder().setName('lucky-card').setDescription('اسحب بطاقتك المونديالية اليومية لتربح جوائز ونقاط عشوائية 🎁'),
         new SlashCommandBuilder().setName('penalty').setDescription('تحدي ركلات الترجيح المباشر بالأزرار ضد البوت الذكي ⚽'),
+        
+        // أوامر الإدارة الحصرية (المحمية بـ Administrator)
         new SlashCommandBuilder().setName('setup-verify').setDescription('إنشاء رسالة التحقق والـ Verification التلقائية بالأزرار (للإدارة)'),
+        
+        new SlashCommandBuilder()
+            .setName('match-poll')
+            .setDescription('إنشاء تصويت تفاعلي بالأزرار لمباراة مونديالية (للإدارة فقط)')
+            .addStringOption(opt => opt.setName('description').setDescription('وصف أو عنوان المباراة (مثال: دور المجموعات)').setRequired(true))
+            .addStringOption(opt => opt.setName('team1').setDescription('اسم المنتخب الأول').setRequired(true))
+            .addStringOption(opt => opt.setName('team2').setDescription('اسم المنتخب الثاني').setRequired(true))
+            .addBooleanOption(opt => opt.setName('allow-draw').setDescription('هل تريد إتاحة خيار التعادل؟').setRequired(true)),
+
+        new SlashCommandBuilder()
+            .setName('giveaway')
+            .setDescription('إنشاء قيف اوي مونديالي منظم بالوقت والإيموجي (للإدارة فقط)')
+            .addStringOption(opt => opt.setName('prize').setDescription('الجائزة (مثال: رتبة خاصة أو 50 نقطة)').setRequired(true))
+            .addIntegerOption(opt => opt.setName('duration').setDescription('المدة الزمنية').setRequired(true))
+            .addStringOption(opt => opt.setName('unit').setDescription('وحدة الوقت').setRequired(true).addChoices({ name: 'دقائق', value: 'm' }, { name: 'ساعات', value: 'h' }))
+            .addStringOption(opt => opt.setName('emoji').setDescription('الإيموجي الخاص بالتفاعل (مثال: 🏆)').setRequired(true))
+            .addIntegerOption(opt => opt.setName('winners').setDescription('عدد الفائزين المحظوظين').setRequired(true)),
 
         new SlashCommandBuilder()
             .setName('choose-team')
@@ -230,7 +251,7 @@ async function startGuessGame(channel, type = 'flag') {
     }
 }
 
-// 7️⃣ استقبال الأوامر السريعة عبر الشات المباشر (.w فقط بعد إزالة التيشرتات)
+// 7️⃣ استقبال الأوامر السريعة عبر الشات المباشر (.w فقط)
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
 
@@ -240,9 +261,10 @@ client.on('messageCreate', async message => {
     }
 });
 
-// 8️⃣ معالجة الـ Slash Commands والتفاعلات بالكامل
+// 8️⃣ معالجة الـ Slash Commands والتفاعلات بالكامل بالأزرار وقاعدة البيانات
 client.on('interactionCreate', async interaction => {
     if (interaction.isButton()) {
+        // زر التحقق والـ Verification
         if (interaction.customId === 'verify_member') {
             await interaction.deferReply({ ephemeral: true });
             let verifyRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === 'member');
@@ -262,10 +284,115 @@ client.on('interactionCreate', async interaction => {
 
     const { commandName, options, channel, user, guild } = interaction;
 
-    if (commandName === 'setup-verify') {
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return interaction.reply({ content: '❌ هذا الأمر مخصص لمسؤولي السيرفر فقط!', ephemeral: true });
+    // الحماية المباشرة: فحص صلاحيات الأدمن لأوامر التأسيس، التصويت، والقيف اوي تلقائياً
+    const isAdminCommand = ['setup-verify', 'match-poll', 'giveaway', 'set-news'].includes(commandName);
+    if (isAdminCommand && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: '❌ خطأ إداري: هذا الأمر مخصص فقط لمسؤولي السيرفر (Administrator)! الأوامر الترفيهية الأخرى متاحة للجميع العب واستمتع.', ephemeral: true });
+    }
+
+    if (commandName === 'match-poll') {
+        await interaction.deferReply();
+        const desc = options.getString('description');
+        const t1 = options.getString('team1');
+        const t2 = options.getString('team2');
+        const allowDraw = options.getBoolean('allow-draw');
+
+        let votes = { t1: 0, t2: 0, draw: 0 };
+        const votedUsers = new Set();
+
+        const generateEmbed = () => {
+            return new EmbedBuilder()
+                .setTitle('📊 تصويت ومراهنة على مباراة مونديالية حية!')
+                .setDescription(`🏆 **تفاصيل الحدث:**\n${desc}\n\nاضغط على الأزرار بالأسفل للتصويت لتوقعك الفائز! (تستطيع التصويت مرة واحدة فقط)`)
+                .addFields(
+                    { name: `🔹 ${t1}`, value: `\`${votes.t1}\` تصويت`, inline: true },
+                    allowDraw ? { name: `🤝 التعادل`, value: `\`${votes.draw}\` تصويت`, inline: true } : { name: '—', value: '—', inline: true },
+                    { name: `🔸 ${t2}`, value: `\`${votes.t2}\` تصويت`, inline: true }
+                )
+                .setColor(0xE67E22)
+                .setFooter({ text: 'تحديث حي ومباشر تلقائياً عند الضغط ⚡' });
+        };
+
+        const pollRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('vote_t1').setLabel(t1).setStyle(ButtonStyle.Primary),
+            ...(allowDraw ? [new ButtonBuilder().setCustomId('vote_draw').setLabel('🤝 التعادل').setStyle(ButtonStyle.Secondary)] : []),
+            new ButtonBuilder().setCustomId('vote_t2').setLabel(t2).setStyle(ButtonStyle.Success)
+        );
+
+        const pollMessage = await interaction.editReply({ embeds: [generateEmbed()], components: [pollRow] });
+        const collector = pollMessage.createMessageComponentCollector({ componentType: ComponentType.Button, time: 24 * 60 * 60 * 1000 }); // متاح لـ 24 ساعة
+
+        collector.on('collect', async btnInt => {
+            if (votedUsers.has(btnInt.user.id)) {
+                return btnInt.reply({ content: '❌ لقد قمت بالتصويت مسبقاً في هذا الاستبيان المونديالي! لا يمكن التلاعب بالأصوات.', ephemeral: true });
+            }
+            
+            votedUsers.add(btnInt.user.id);
+            if (btnInt.customId === 'vote_t1') votes.t1++;
+            if (btnInt.customId === 'vote_t2') votes.t2++;
+            if (btnInt.customId === 'vote_draw') votes.draw++;
+
+            await btnInt.deferUpdate();
+            await interaction.editReply({ embeds: [generateEmbed()] });
+        });
+    }
+
+    if (commandName === 'giveaway') {
+        await interaction.reply({ content: '🎉 تم إطلاق القيف اوي بنجاح في الغرفة!', ephemeral: true });
+        
+        const prize = options.getString('prize');
+        const duration = options.getInteger('duration');
+        const unit = options.getString('unit');
+        const customEmoji = options.getString('emoji');
+        const winnersCount = options.getInteger('winners');
+
+        const durationMs = unit === 'm' ? duration * 60 * 1000 : duration * 60 * 60 * 1000;
+        const endTimestamp = Math.floor((Date.now() + durationMs) / 1000);
+
+        const giveawayEmbed = new EmbedBuilder()
+            .setTitle(`🎁 قيف اوي المونديال الكبرى / WORLD CUP GIVEAWAY`)
+            .setDescription(`شارك الآن واكسب جوائز رائعة مقدمة من إدارة السيرفر!\n\n🏆 **الجائزة المتاحة:** **${prize}**\n⚡ **عدد الفائزين المطلوب:** \`${winnersCount}\` لاعب\n⏱️ **ينتهي في:** <t:${endTimestamp}:R> (<t:${endTimestamp}:f>)\n\nاضغط على الإيموجي **[ ${customEmoji} ]** بالأسفل للدخول السريع في السحب الإلكتروني!`)
+            .setColor(0xD35400)
+            .setFooter({ text: 'نظام السحب عشوائي بالكامل وعادل للأعضاء' });
+
+        const giveawayMsg = await channel.send({ embeds: [giveawayEmbed] });
+        
+        try {
+            await giveawayMsg.react(customEmoji);
+        } catch (err) {
+            return channel.send('❌ خطأ في الإيموجي: يرجى التأكد من كتابة إيموجي صحيح أو إيموجي عام للسيرفر ليتفاعل به البوت.');
         }
+
+        setTimeout(async () => {
+            try {
+                const refreshedMsg = await channel.messages.fetch(giveawayMsg.id);
+                const reaction = refreshedMsg.reactions.cache.get(customEmoji);
+                if (!reaction) return channel.send(`❌ لم يتم العثور على أي تفاعلات على قيف اوي الجائزة: **${prize}**.`);
+
+                const usersReaction = await reaction.users.fetch();
+                const eligibleUsers = usersReaction.filter(u => !u.bot).map(u => u.id);
+
+                if (eligibleUsers.length === 0) {
+                    return channel.send(`😔 انتهى وقت القيف اوي على **${prize}**، ولكن لم يشترك أحد بالإيموجي المطلوبة!`);
+                }
+
+                // خوارزمية السحب العشوائي المونديالي المتعدد
+                const shuffled = eligibleUsers.sort(() => 0.5 - Math.random());
+                const winners = shuffled.slice(0, winnersCount).map(id => `<@${id}>`);
+
+                const endEmbed = new EmbedBuilder()
+                    .setTitle('🎉 انتهى القيف اوي وتم إعلان الفائزين!')
+                    .setDescription(`🎁 **الجائزة الموزعة:** **${prize}**\n\n🥇 **قائمة الفائزين العباقرة المحظوظين:**\n${winners.join(', ')}`)
+                    .setColor(0x27AE60);
+
+                await channel.send({ content: `🥳 مبروك للفائزين معنا اليوم بالملعب: ${winners.join(', ')}! تواصلوا مع الـ Administrator لاستلام رتبكم أو جوائزكم الرياضية!`, embeds: [endEmbed] });
+            } catch (err) {
+                console.error(err);
+            }
+        }, durationMs);
+    }
+
+    if (commandName === 'setup-verify') {
         await interaction.deferReply();
         const verifyEmbed = new EmbedBuilder()
             .setTitle('🛡️ نظام التحقق والأمان التلقائي / Verification System')
@@ -415,7 +542,7 @@ client.on('interactionCreate', async interaction => {
             .addFields(
                 { name: '🎮 ألعاب وتحديات ترفيهية / Games', value: '`/penalty` - تحدي ركلات ترجيح كامل بالأزرار\n`/lucky-card` - كرت الحظ اليومي لربح النقاط\n`/guess-player` - تحدي "من أنا؟" لتخمين لاعبين\n`.w` - تشغيل تخمين علم الدولة المونديالية بالشات', inline: true },
                 { name: '🏆 شؤون كأس العالم / World Cup', value: '`/profile` - عرض ملفك الشخصي الرياضي وأهدافك ونقاطك\n`/choose-team` - حدد منتخبك المفضل في البطولة\n`/predict` - توقع مباراة الافتتاح لتكسب +3 نقاط\n`/teams` - عرض المجموعات والمنتخبات\n`/countdown` - الوقت المتبقي على الافتتاح المكسيكي', inline: true },
-                { name: '🛠️ أدوات الإدارة والأمن / Admin Tools', value: '`/set-news` - تحديد الروم الرسمي لاستقبال البث والأحداث الحية والأمطار والأهداف\n`/setup-verify` - إرسال رسالة التحقق بالأزرار التلقائية لحماية السيرفر', inline: false }
+                { name: '🛠️ أدوات الإدارة والأمن والحماية / Admin Control', value: '`/set-news` - تحديد روم البث والأحداث والأمطار\n`/setup-verify` - رسالة التحقق وحماية الرومات بالأزرار\n`/match-poll` - استبيان تصويت وتحدي مباشر بين منتخبين بالأزرار\n`/giveaway` - إطلاق قيف اوي احترافي بالوقت والإيموجي والمنشن', inline: false }
             ).setColor(0x8E44AD);
         await interaction.editReply({ embeds: [helpEmbed] });
     }
@@ -505,7 +632,7 @@ function setupAutomaticMatchResult() {
     }
 }
 
-// 🔟 محاكاة الأحداث المونديالية والطقس والأهداف المباشرة تلقائياً (تشتغل دورياً بالروم المختار)
+// 🔟 محاكاة الأحداث المونديالية والطقس والأهداف المباشرة تلقائياً
 function setupLiveWorldCupSimulator() {
     const liveEvents = [
         { title: "🚨 عاجل: انطلاق صافرة بداية كأس العالم 2026 رسميًا!", desc: "🏟️ الألعاب النارية تغطي سماء ملعب الافتتاح بالمكسيك والجماهير تهتف بحرارة! انطلقت البطولة الأعظم تاريخيًا! ⚽🏆", color: 0x27AE60 },
@@ -516,7 +643,6 @@ function setupLiveWorldCupSimulator() {
         { title: "⚽ جـوووووول! الفراعنة يفجرون المرمى بهدف حاسم!", desc: "🇪🇬 تمريرة بينية متقنة تضع هجوم منتخب مصر في انفراد تام ليسكنها شباك الخصم ببراعة لا تصدق! تاش تاش! 🔥", color: 0xE74C3C }
     ];
 
-    // يعمل النظام على بث حدث مونديالي مباشر مشوق عشوائياً كل 45 دقيقة بالرومات المحددة من قبل الإدارة
     setInterval(async () => {
         const guildsConfig = db.prepare('SELECT * FROM config').all();
         if (guildsConfig.length === 0) return;
@@ -532,9 +658,7 @@ function setupLiveWorldCupSimulator() {
             try {
                 const channel = await client.channels.fetch(conf.newsChannelId);
                 if (channel) await channel.send({ embeds: [liveEmbed] });
-            } catch (err) {
-                // تخطي إذا كانت الغرفة غير موجودة أو الصلاحيات ناقصة
-            }
+            } catch (err) { /* تجاهل الأخطاء البسيطة */ }
         }
     }, 45 * 60 * 1000); 
 }
