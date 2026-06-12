@@ -1,5 +1,5 @@
 /**
- * Bot Version: 6.0.0v (The Ultimate Football Mafia World Cup Edition)
+ * Bot Version: 7.0.0v (The Infinite Loop Classic Mafia Game)
  * Developer: ta_im1 | Team: TRL for development
  * Platform: Optimized for Mobile (Pydroid 3 / Replit)
  */
@@ -11,10 +11,9 @@ const {
 } = require('discord.js');
 const express = require('express');
 
-// 1️⃣ خادم الويب للحفاظ على استقرار البوت
 const app = express();
 const port = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Gangster-bot Football Mafia is Active! 🚀'));
+app.get('/', (req, res) => res.send('Gangster-bot Classic Mafia Loop is Active! 🚀'));
 app.listen(port, () => console.log(`[SYSTEM] Web server active on port ${port}`));
 
 const client = new Client({
@@ -27,12 +26,11 @@ const client = new Client({
     ]
 });
 
-const BOT_VERSION = "6.0.0v";
+const BOT_VERSION = "7.0.0v";
 const tempUsers = new Map();
 let activeMafiaGame = null;
 let TICKET_LOG_CHANNEL_ID = "ضع_هنا_ايدي_روم_الادارة"; 
 
-// --- [ قاعدة بيانات الأنظمة الرياضية القديمة ] ---
 function getUserData(userId, username) {
     if (!tempUsers.has(userId)) {
         tempUsers.set(userId, { userId, username: username || 'مشجع مونديالي', points: 0, favoriteTeam: 'لم يحدد بعد ⚽', goalsScored: 0 });
@@ -46,7 +44,7 @@ const flagData = [
     { countryAr: "مصر", countryEn: "egypt", flagUrl: "https://flagcdn.com/w640/eg.png" }
 ];
 
-// 2️⃣ تسجيل الأوامر المائلة الشاملة (مع أمر التحديثات الجديد)
+// 1️⃣ تسجيل الأوامر المائلة الشاملة (مع إضافة أمر /info ℹ️ وأمر التحديثات)
 client.once('ready', async () => {
     console.log(`[ONLINE] Logged in as ${client.user.tag}! Version: ${BOT_VERSION}`);
 
@@ -56,9 +54,10 @@ client.once('ready', async () => {
         new SlashCommandBuilder().setName('penalty').setDescription('تحدي ركلات الترجيح التفاعلي ضد البوت'),
         new SlashCommandBuilder().setName('guess-nationality').setDescription('بدء لعبة خمن جنسية اللاعب من العلم'),
         new SlashCommandBuilder().setName('updates').setDescription('عرض التحديثات الجديدة والأنظمة الأسطورية التي تمت إضافتها للبوت'),
+        new SlashCommandBuilder().setName('info').setDescription('ℹ️ دليل وشرح لعبة المافيا الكلاسيكية بالتفصيل والملخص'),
         new SlashCommandBuilder()
             .setName('mafia')
-            .setDescription('بدء جولة بطولة مافيا المونديال (حكام، مسعفين، جمهور)')
+            .setDescription('بدء جولة بطولة المافيا الكلاسيكية الكبرى (نظام الجولات اللانهائية)')
             .addBooleanOption(opt => opt.setName('mention_everyone').setDescription('منشن إيفري وان (خاص بالأدمنستريتر فقط)').setRequired(false)),
         new SlashCommandBuilder()
             .setName('vote')
@@ -97,7 +96,7 @@ client.once('ready', async () => {
     } catch (e) { console.error(e); }
 });
 
-// 3️⃣ استقبال الاختصارات النصية المتبقية (.w و .dm)
+// 2️⃣ استقبال الاختصارات النصية (.w و .dm)
 client.on('messageCreate', async message => {
     if (!message.guild || message.author.bot) return;
     const msgContent = message.content.trim().toLowerCase();
@@ -130,54 +129,71 @@ client.on('messageCreate', async message => {
     }
 });
 
-// 4️⃣ تشغيل وإدارة نظام المافيا الكروية المطور بالكامل والأمر الجديد التحديثات
+// 3️⃣ إدارة نظام المافيا الكلاسيكي المتكرر والأوامر المائلة الجديدة
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    // أمر التحديثات الجديد للـ Slash
+    // أمر الشرح الشامل والملخص للماميا /info ℹ️
+    if (interaction.commandName === 'info') {
+        const infoEmbed = new EmbedBuilder()
+            .setTitle('ℹ️ دليل وإستراتيجيات لعبة المافيا الكلاسيكية الشامل')
+            .setDescription(
+                '**🕵️‍♂️ ما هي لعبة مافيا؟ (الشرح الطويل التفصيلي):**\n' +
+                'لعبة ذكاء واجتماع تعتمد على الخداع والإقناع وقراءة لغة الجسد. تقوم على صراع بين مجموعتين:\n' +
+                '• **الأغلبية غير الواعية (المواطنون):** لا يعرفون هويات بعضهم، وهدفهم كشف المافيا نهاراً عبر النقاش والتصويت العادل.\n' +
+                '• **الأقلية الواعية (المافيا):** عصابة مختبئة تعرف بعضها وتختار ضحية لتصفيتها كل ليلة دون الانكشاف.\n\n' +
+                '**🎭 الأدوار الأساسية وقدراتها السرية:**\n' +
+                '• 🟥 **المافيا العادي 🔫:** يختار ضحية مع عصابته ليلاً ويتظاهر بالبراءة نهاراً.\n' +
+                '• 🧑‍🌾 **المواطن العادي 👤:** قوته في صوته ونقاشه الذكي لكشف الكاذبين.\n' +
+                '• 🔍 **المحقق / الشرطي 🕵️‍♂️:** يستيقظ ليلاً ليفحص هويّة لاعب واحد ويعرف إن كان مافيا أم لا.\n' +
+                '• 🩺 **الطبيب / الدكتور 🚑:** يختار شخصاً كل ليلة لحمايته وإنقاذه من القتل السري.\n\n' +
+                '**📝 ملخص اللعبة السريع (في ثوانٍ):**\n' +
+                'تنام المدينة ليلاً 🌙 ⟵ تقتل المافيا شخصاً ⟵ يحمي الطبيب شخصاً ⟵ يفحص المحقق شخصاً ⟵ يستيقظ الجميع نهاراً ☀️ ⟵ يُعلن البوت نجاح أو فشل القتل ⟵ يبدأ نقاش وتصويت لإقصاء المتهم الأكبر ⟵ تتكرر الدورة حتى يتم طرد كل المافيا (فوز المواطنين) أو يتساوى العدد (فوز المافيا).'
+            )
+            .setColor(0x5865F2)
+            .setThumbnail('https://images2.imgbox.com/71/34/4mP9Y7C1_o.png')
+            .setFooter({ text: 'تطوير بواسطة: ta_im1 | Gangster-bot' });
+        return interaction.reply({ embeds: [infoEmbed] });
+    }
+
     if (interaction.commandName === 'updates') {
         const updateEmbed = new EmbedBuilder()
             .setTitle('🚀 التحديثات الجديدة للبطولات والأنظمة | Gangster-bot')
-            .setDescription('**آخر ما تم إضافته وتطويره بالكامل بناءً على رغبة المجتمع الفخم:**\n\n' +
-                            '• ⚽ **نظام مافيا المونديال الجديد (`/mafia`):** تحويل الأسماء لتعاكس أجواء كرة القدم (حكام، مسعفين، جمهور) بدلاً من المصطلحات التقليدية.\n' +
-                            '• 📢 **المنشن الإداري الاختياري:** تحكم كامل للـ Administrator لمنشنة السيرفر أو تشغيل الجولة بهدوء دون إزعاج.\n' +
-                            '• 📊 **العدادات الحية للأصوات:** شات المناقشة والتصويت يعرض الآن عداد الأصوات المباشر متزامناً مع اختيارات اللاعبين ثانية بثانية.\n' +
-                            '• 🤖 **مستودع البوتات الهجين:** زِر خاص للإدارة العليا لضخ بوتات ذكاء اصطناعي تفاعلية داخل ساحة اللعب حتى 25 بوت!')
+            .setDescription('• 🔁 **نظام الجولات المتتالية اللانهائي:** اللعبة الآن لا تنتهي بتصويت واحد، بل تستمر وتتعاقب الأطوار (ليل ثم نهار) تلقائياً مع إعلانات نجاح أو فشل القتلات حتى يتم تلبية شروط الفوز الفعلي.\n' +
+                            '• 🎭 **العودة للجذور الكلاسيكية:** إرجاع أدوار المافيا، الطبيب، المحقق، والمواطنين بناءً على دليل القوانين الأصلي.\n' +
+                            '• ℹ️ **أمر الشرح المطور:** إضافة أمر `/info` لاستعراض الاستراتيجيات والشرح المفصل والملخص للأعضاء الجدد بالسيرفر.')
             .setColor(0x2ECC71)
-            .setThumbnail('https://images2.imgbox.com/71/34/4mP9Y7C1_o.png')
-            .setFooter({ text: `تطوير بواسطة: ta_im1 | الاصدار الحركي الحصري: ${BOT_VERSION}` });
+            .setFooter({ text: `تطوير بواسطة: ta_im1 | الاصدار: ${BOT_VERSION}` });
         return interaction.reply({ embeds: [updateEmbed] });
     }
 
     if (interaction.commandName === 'mafia') {
-        if (activeMafiaGame) return interaction.reply({ content: '⚠️ هناك جولة مافيا قائمة بالفعل في هذا الشات!', ephemeral: true });
+        if (activeMafiaGame) return interaction.reply({ content: '⚠️ هناك جولة مافيا قائمة بالفعل في هذا الشات الحين!', ephemeral: true });
 
         const doMention = interaction.options.getBoolean('mention_everyone') || false;
-
         if (doMention && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return interaction.reply({ content: '❌ لا يمكنك استخدام خيار منشن إيفري وان إلا إذا كنت تمتلك رتبة Administrator (الإدارة العليا)!', ephemeral: true });
+            return interaction.reply({ content: '❌ خيار المنشن مخصص فقط للـ Administrator!', ephemeral: true });
         }
 
         activeMafiaGame = { 
             hostChannel: interaction.channel.id, 
             players: new Map(),
-            votes: new Map(),
-            votedUsers: new Set()
+            round: 1,
+            nightActions: { mafiaKill: null, doctorSave: null, detectiveCheck: null }
         };
 
         const updateEmbed = () => {
-            const playerList = Array.from(activeMafiaGame.players.values()).map((p, idx) => `${idx + 1}- <@${p.id}> ${p.isBot ? '🤖 [بوت ذكاء اصطناعي]' : '👤'}`).join('\n') || 'لا يوجد لاعبين مسجلين حتى الآن.';
+            const playerList = Array.from(activeMafiaGame.players.values()).map((p, idx) => `${idx + 1}- <@${p.id}> ${p.isBot ? '🤖 [AI]' : '👤'}`).join('\n') || 'لا يوجد لاعبين مسجلين حتى الآن.';
             return new EmbedBuilder()
                 .setTitle('✨ .•°•-BRQ Community Mafia-•°•? ✨')
-                .setDescription('**📊 شرح اللعبة والأدوار الكروية الحالية:**\n' +
+                .setDescription('**📖 شرح اللعبة والقوانين الرسمية:**\n' +
                                 '1- انضم للعبة عبر الزر الأخضر الموجود في الأسفل.\n' +
-                                '2- كل لاعب يحصل على دور سري (حكام 🟥، مسعفين 🚑، جمهور 🏟️).\n' +
-                                '3- **الحكام 🟥:** وظيفتهم إعطاء بطاقات حمراء لطرد اللاعبين من المباراة.\n' +
-                                '4- **المسعفين 🚑:** يقومون بمعالجة اللاعبين الذين تم طردهم وإعادتهم للمباراة فوراً.\n' +
-                                '5- **الجمهور 🏟️:** يصوتون نهاراً لإقصاء الحكام الفاسدين؛ يفوز الجمهور والمسعفين بإقصاء جميع الحكام.\n\n' +
+                                '2- كل لاعب يحصل على دور سري (مافيا 🟥، طبيب 🩺، محقق 🔍، مواطن 👤).\n' +
+                                '3- تتصرف الأدوار الخاصة سراً ليلاً؛ نهاراً يصوت الجميع لطرد مشتبه به.\n' +
+                                '4- يفوز المواطنون بإقصاء جميع القاتلين، وتفوز المافيا إن تفوق عددهم أو تساوى مع الأحياء.\n\n' +
                                 `**المشاركين الحاليين في البطولة (${activeMafiaGame.players.size}/25):**\n\n${playerList}\n\n` +
-                                'اضغط على 📥 للانضمام إلى اللعبة فوراً')
-                .setImage('https://images2.imgbox.com/71/34/4mP9Y7C1_o.png') // استخدام الصورة الأسطورية الكبيرة بالإمبيد لتعطي شكل نار
+                                `⏱️ ستبدأ اللعبة تلقائياً بعد انتهاء الـ 30 ثانية لتجميع اللاعبين...`)
+                .setImage('https://images2.imgbox.com/71/34/4mP9Y7C1_o.png') // الخلفية الأسطورية الفخمة الثابتة بالإمبيد
                 .setColor(0x5865F2)
                 .setFooter({ text: 'تطوير بواسطة: ta_im1 | Gangster-bot', iconURL: 'https://images2.imgbox.com/71/34/4mP9Y7C1_o.png' });
         };
@@ -186,145 +202,200 @@ client.on('interactionCreate', async interaction => {
             new ButtonBuilder().setCustomId('mafia_in').setEmoji('📥').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId('mafia_out').setEmoji('📤').setStyle(ButtonStyle.Danger)
         );
-
         const adminRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('mafia_admin_add_bot').setLabel('🤖 إضافة بوت (أدمن)').setStyle(ButtonStyle.Secondary)
         );
 
-        await interaction.reply({ content: '✅ تم إطلاق جولة المافيا المونديالية بنجاح!', ephemeral: true });
+        await interaction.reply({ content: '✅ تم إطلاق ساحة المافيا بنجاح!', ephemeral: true });
         
-        let gameMsg;
-        if (doMention) {
-            gameMsg = await interaction.channel.send({ content: '@everyone 🔥 **بدأت بطولة مافيا المونديال الجديدة الحين! حكام ومسعفين وجمهور، تعالوا وسجلوا!**', embeds: [updateEmbed()], components: [memberRow, adminRow] });
-        } else {
-            gameMsg = await interaction.channel.send({ embeds: [updateEmbed()], components: [memberRow, adminRow] });
-        }
+        let gameMsg = doMention 
+            ? await interaction.channel.send({ content: '@everyone 🔥 **بدأت بطولة المافيا الكلاسيكية الكبرى! انضموا الآن!**', embeds: [updateEmbed()], components: [memberRow, adminRow] })
+            : await interaction.channel.send({ embeds: [updateEmbed()], components: [memberRow, adminRow] });
 
-        // جعل مدة الانتظار والتسجيل 30 ثانية كاملة كما طلبت بالملي قبل أن تبدأ المافيا
-        const lobbyCollector = gameMsg.createMessageComponentCollector({ time: 30000 }); 
+        const lobbyCollector = gameMsg.createMessageComponentCollector({ time: 30000 }); // الانتظار 30 ثانية كاملة قبل البدء
 
         lobbyCollector.on('collect', async i => {
             if (i.customId === 'mafia_in') {
-                if (activeMafiaGame.players.has(i.user.id)) return i.reply({ content: '❌ أنت مسجل بالفعل بالبطولة!', ephemeral: true });
-                activeMafiaGame.players.set(i.user.id, { id: i.user.id, username: i.user.username, isBot: false });
+                if (activeMafiaGame.players.has(i.user.id)) return i.reply({ content: '❌ أنت مسجل بالفعل!', ephemeral: true });
+                activeMafiaGame.players.set(i.user.id, { id: i.user.id, username: i.user.username, isBot: false, alive: true, role: 'مواطن 👤' });
                 await i.deferUpdate(); await gameMsg.edit({ embeds: [updateEmbed()] });
             }
             if (i.customId === 'mafia_out') {
-                if (!activeMafiaGame.players.has(i.user.id)) return i.reply({ content: '❌ أنت غير مسجل أصلاً لتخرج منها!', ephemeral: true });
+                if (!activeMafiaGame.players.has(i.user.id)) return i.reply({ content: '❌ أنت غير مسجل أصلاً لتخرج!', ephemeral: true });
                 activeMafiaGame.players.delete(i.user.id);
                 await i.deferUpdate(); await gameMsg.edit({ embeds: [updateEmbed()] });
             }
             if (i.customId === 'mafia_admin_add_bot') {
-                if (!i.member.permissions.has(PermissionFlagsBits.Administrator)) {
-                    return i.reply({ content: '❌ هذا الزر مخصص للـ Administrator فقط لضخ بوتات باللعبة!', ephemeral: true });
-                }
+                if (!i.member.permissions.has(PermissionFlagsBits.Administrator)) return i.reply({ content: '❌ للأدمن فقط!', ephemeral: true });
                 const botId = `bot_${Math.floor(Math.random() * 100000)}`;
-                const botName = `AI-Player-${activeMafiaGame.players.size + 1}`;
-                activeMafiaGame.players.set(botId, { id: interaction.client.user.id, username: botName, isBot: true, fakeId: botId });
-                
-                await i.reply({ content: `🤖 تم إدخال البوت المونديالي بنجاح: **${botName}**`, ephemeral: true });
+                const botName = `Mafia-AI-${activeMafiaGame.players.size + 1}`;
+                activeMafiaGame.players.set(botId, { id: interaction.client.user.id, username: botName, isBot: true, alive: true, role: 'مواطن 👤', fakeId: botId });
+                await i.reply({ content: `🤖 تم إدخال البوت: **${botName}**`, ephemeral: true });
                 await gameMsg.edit({ embeds: [updateEmbed()] });
             }
         });
 
         lobbyCollector.on('end', async () => {
             if (!activeMafiaGame) return;
-            if (activeMafiaGame.players.size < 2) {
-                await interaction.channel.send('❌ تم إلغاء الجولة لعدم اكتمال النصاب الأدنى لبدء المباراة (لاعبين على الأقل).');
+            if (activeMafiaGame.players.size < 3) {
+                await interaction.channel.send('❌ تم إلغاء الجولة لعدم اكتمال الحد الأدنى المطلوب لإدارة أدوار اللعبة (3 لاعبين على الأقل).');
                 activeMafiaGame = null;
                 return;
             }
 
+            // توزيع الأدوار الكلاسيكية سراً في بداية الجولة الأولى
             const playersArr = Array.from(activeMafiaGame.players.values());
-            const mafiaIndex = Math.floor(Math.random() * playersArr.length);
-            
-            // توزيع الكروت والأدوار الجديدة بناءً على اللوجيك الجديد
-            playersArr.forEach((p, idx) => {
-                if (idx === mafiaIndex) {
-                    p.role = 'حكم 🟥 (مافيا)';
-                } else if (idx === (mafiaIndex + 1) % playersArr.length) {
-                    p.role = 'مسعف 🚑 (طبيب)';
-                } else {
-                    p.role = 'جمهور 🏟️ (مواطن)';
-                }
-                
+            const shuffled = playersArr.sort(() => 0.5 - Math.random());
+            shuffled[0].role = 'مافيا 🟥';
+            shuffled[1].role = 'طبيب 🩺';
+            if (shuffled.length > 2) shuffled[2].role = 'محقق 🔍';
+
+            playersArr.forEach(p => {
                 if (!p.isBot) {
-                    client.users.fetch(p.id).then(u => u.send(`🎮 بدأت صافرة المباراة! دورك السري هو: **${p.role}**`).catch(() => {}));
+                    client.users.fetch(p.id).then(u => u.send(`🎮 بدأت معركة المافيا! دورك السري المقدس هو: **${p.role}**`).catch(() => {}));
                 }
             });
 
-            await interaction.channel.send('🎮 **تم قفل ساحة التسجيل وتوزيع الكروت والأدوار سراً على الخاص!**\n⏱️ **بدأ الآن وقت التفكير والمناقشة الحرة والسوالف بين الجمهور (30 ثانية).. تناقشوا بحذر!**');
-
-            setTimeout(async () => {
-                if (activeMafiaGame) {
-                    await interaction.channel.send('💡 **[تنبيه هام للمناقشة]** مضت 15 ثانية! لازم تعرفوا وتكتشفوا مين الحكم الفاسد 🟥 الذي يعطي كروت حمر ويخرب المباراة، وايش لازم تسووا عشان تصوتوا صح الحين!');
-                }
-            }, 15000);
-
-            setTimeout(async () => {
-                if (!activeMafiaGame) return;
-                await interaction.channel.send('🗳️ **انتهى وقت التفكير المفتوح! بدأت ساحة التصويت الحية لإقصاء المتهمين!**');
-
-                const rows = [];
-                let currentRow = new ActionRowBuilder();
-                playersArr.forEach(p => activeMafiaGame.votes.set(p.fakeId || p.id, 0));
-
-                for (let i = 0; i < playersArr.length; i++) {
-                    if (i > 0 && i % 5 === 0) { rows.push(currentRow); currentRow = new ActionRowBuilder(); }
-                    const labelName = playersArr[i].username.slice(0, 10);
-                    currentRow.addComponents(
-                        new ButtonBuilder().setCustomId(`vote_target_${playersArr[i].fakeId || playersArr[i].id}`).setLabel(labelName).setStyle(ButtonStyle.Primary)
-                    );
-                }
-                if (currentRow.components.length >= 5) { rows.push(currentRow); currentRow = new ActionRowBuilder(); }
-                currentRow.addComponents(new ButtonBuilder().setCustomId('vote_target_skip').setLabel('⏭️ تخطي الجولة').setStyle(ButtonStyle.Danger));
-                rows.push(currentRow);
-
-                const voteEmbed = new EmbedBuilder()
-                    .setTitle('🗳️ لوحة تصويت جولة المافيا الحية')
-                    .setDescription('اضغط على اسم الشخص للتصويت ضده وإقصائه، العداد سيحدث فوراً في الشات!')
-                    .setColor(0xE74C3C);
-
-                const voteMsg = await interaction.channel.send({ embeds: [voteEmbed], components: rows });
-                const voteCollector = voteMsg.createMessageComponentCollector({ time: 30000 });
-
-                voteCollector.on('collect', async vInteraction => {
-                    if (activeMafiaGame.votedUsers.has(vInteraction.user.id)) {
-                        return vInteraction.reply({ content: '❌ لقد قمت بالتصويت بالفعل في هذه الجولة ولا يمكنك التغيير!', ephemeral: true });
-                    }
-
-                    if (vInteraction.customId === 'vote_target_skip') {
-                        activeMafiaGame.votedUsers.add(vInteraction.user.id);
-                        await vInteraction.reply({ content: `✅ اخترت تخطي هذه الجولة!`, ephemeral: true });
-                        await interaction.channel.send(`⏭️ العضو <@${vInteraction.user.id}> صوت على **تخطي الجولة**.`);
-                        return;
-                    }
-
-                    if (vInteraction.customId.startsWith('vote_target_')) {
-                        const targetId = vInteraction.customId.replace('vote_target_', '');
-                        const currentCount = activeMafiaGame.votes.get(targetId) || 0;
-                        activeMafiaGame.votes.set(targetId, currentCount + 1);
-                        activeMafiaGame.votedUsers.add(vInteraction.user.id);
-
-                        const targetObj = playersArr.find(p => (p.fakeId || p.id) === targetId);
-                        const targetName = targetObj ? targetObj.username : "لاعب";
-
-                        await vInteraction.reply({ content: `✅ تم تسجيل صوتك ضد ${targetName} بنجاح!`, ephemeral: true });
-                        await interaction.channel.send(`🎯 <@${vInteraction.user.id}> صوت ضد **${targetName}**! العداد الحالي له: [\`${currentCount + 1}\` أصوات] 📈`);
-                    }
-                });
-
-                voteCollector.on('end', async () => {
-                    await interaction.channel.send('🏁 **انتهت صافرة الحكم ووقت التصويت! تم تصفير وإغلاق المباراة بنجاح ويمكنكم اللعب مجدداً عبر الأمر المائل!**');
-                    activeMafiaGame = null;
-                });
-
-            }, 30000);
+            await interaction.channel.send('🎮 **تم إغلاق التسجيل وتوزيع البطاقات السرية على الخاص! بدأت الجولات المتعاقبة الآن!**');
+            runGameLoop(interaction.channel); // إطلاق حلقة اللعب التلقائية اللانهائية
         });
     }
 });
 
-// 5️⃣ باقي الأنظمة والمسابقات المحفوظة (Ticket, Giveaway, Vote, Games)
+// 4️⃣ الحلقة التكرارية لإدارة الأطوار (الليل والنهار ونتائج القتل والتصويت)
+async function runGameLoop(channel) {
+    if (!activeMafiaGame) return;
+
+    // فحص شروط الفوز أولاً قبل كل ليلة جديدة
+    const playersArr = Array.from(activeMafiaGame.players.values()).filter(p => p.alive);
+    const mafiaCount = playersArr.filter(p => p.role === 'مافيا 🟥').length;
+    const citizensCount = playersArr.length - mafiaCount;
+
+    if (mafiaCount === 0) {
+        await channel.send('🎉 **انتصرت المدينة! تم القضاء على جميع أفراد المافيا بنجاح! فوز ساحق للمواطنين والجمهور الأوفياء!** 🥳');
+        activeMafiaGame = null; return;
+    }
+    if (mafiaCount >= citizensCount) {
+        await channel.send('😈 **سيطرت العصابة! تساوى عدد المافيا مع المواطنين، تم الاستيلاء على السيرفر وفازت المافيا كلياً!** 🔥');
+        activeMafiaGame = null; return;
+    }
+
+    await channel.send(`\n🌙 **[الجولة ${activeMafiaGame.round}] - حلّ الليل الآن وتنام المدينة بالكامل.. الاستيقاظ للأدوار الخاصة فقط سراً!**`);
+    activeMafiaGame.nightActions = { mafiaKill: null, doctorSave: null, detectiveCheck: null };
+
+    // محاكاة الأفعال الليلية الذكية (لتجنب الوقوف التام على الخاص وبدء المتعة المباشرة بالتصويت المفتوح)
+    const alivePlayers = playersArr;
+    const mafiaUser = alivePlayers.find(p => p.role === 'مافيا 🟥');
+    const doctorUser = alivePlayers.find(p => p.role === 'طبيب 🩺');
+    const detectiveUser = alivePlayers.find(p => p.role === 'محقق 🔍');
+
+    const targets = alivePlayers.map(p => p.fakeId || p.id);
+    
+    if (mafiaUser) activeMafiaGame.nightActions.mafiaKill = targets[Math.floor(Math.random() * targets.length)];
+    if (doctorUser) activeMafiaGame.nightActions.doctorSave = targets[Math.floor(Math.random() * targets.length)];
+    if (detectiveUser) activeMafiaGame.nightActions.detectiveCheck = targets[Math.floor(Math.random() * targets.length)];
+
+    // الانتظار 10 ثوانٍ لتمثيل طور الليل سراً
+    setTimeout(async () => {
+        await channel.send('🌅 **تستيقظ المدينة الحين! طلع النهار والكل يفتح عيونه للنقاش العام!**');
+        
+        const killTarget = activeMafiaGame.nightActions.mafiaKill;
+        const saveTarget = activeMafiaGame.nightActions.doctorSave;
+
+        // التحقق وإعلان نجاح أو فشل عملية القتل بناءً على الشرح الأصلي
+        if (killTarget && killTarget !== saveTarget) {
+            const deadPlayer = alivePlayers.find(p => (p.fakeId || p.id) === killTarget);
+            if (deadPlayer) {
+                deadPlayer.alive = false;
+                await channel.send(`🩸 **أخبار فاجعة! نجحت عملية الاغتيال ليلاً، وتمت تصفية وطرد اللاعب: <@${deadPlayer.id}> ${deadPlayer.isBot ? `[${deadPlayer.username}]` : ''} من الساحة!**`);
+            }
+        } else {
+            await channel.send('🛡️ **ليلة هادئة وصالحة جداً! حاولت المافيا القتل ولكن عملية القتل فشلت تماماً بفضل تدخل الطبيب المنقذ السريع!**');
+        }
+
+        // نقاش سريع ثم لوحة التصويت لإقصاء المتهم التالي لزيادة اللاعبين والأصوات
+        await channel.send('⏱️ **لديك 20 ثانية للتفكير والمناقشة الحية بشات السيرفر لكشف الكاذبين قبل فتح صناديق التصويت العادلة!**');
+
+        setTimeout(async () => {
+            const currentAlive = Array.from(activeMafiaGame.players.values()).filter(p => p.alive);
+            if (currentAlive.length < 2) {
+                await channel.send('🏁 انتهت المباراة لعدم وجود لاعبين كافيين للاستمرار!');
+                activeMafiaGame = null; return;
+            }
+
+            await channel.send('🗳️ **فتحت الآن ساحة التصويت النهارية لتقليص وطرد المشتبه بهم! اضغطوا على الأزرار فوراً:**');
+            
+            const rows = [];
+            let currentRow = new ActionRowBuilder();
+            const votesMap = new Map();
+            const votedUsersSet = new Set();
+
+            currentAlive.forEach(p => votesMap.set(p.fakeId || p.id, 0));
+
+            for (let i = 0; i < currentAlive.length; i++) {
+                if (i > 0 && i % 5 === 0) { rows.push(currentRow); currentRow = new ActionRowBuilder(); }
+                const labelName = currentAlive[i].username.slice(0, 10);
+                currentRow.addComponents(
+                    new ButtonBuilder().setCustomId(`loop_vote_${currentAlive[i].fakeId || currentAlive[i].id}`).setLabel(labelName).setStyle(ButtonStyle.Primary)
+                );
+            }
+            if (currentRow.components.length >= 5) { rows.push(currentRow); currentRow = new ActionRowBuilder(); }
+            currentRow.addComponents(new ButtonBuilder().setCustomId('loop_vote_skip').setLabel('⏭️ تخطي').setStyle(ButtonStyle.Danger));
+            rows.push(currentRow);
+
+            const voteEmbed = new EmbedBuilder().setTitle('🗳️ لوحة تصويت جولة المافيا الكلاسيكية المتزامنة').setDescription('صوت ضد المتهم الأكبر وسيحدث العداد فوراً بالشات!').setColor(0xE74C3C);
+            const voteMsg = await channel.send({ embeds: [voteEmbed], components: rows });
+
+            const collector = voteMsg.createMessageComponentCollector({ time: 20000 });
+
+            collector.on('collect', async v => {
+                const voter = currentAlive.find(p => p.id === v.user.id || (p.isBot && p.id === v.user.id));
+                if (votedUsersSet.has(v.user.id)) return v.reply({ content: '❌ صوتك مسجل سابقاً بالجولة الحالية!', ephemeral: true });
+
+                if (v.customId === 'loop_vote_skip') {
+                    votedUsersSet.add(v.user.id);
+                    await v.reply({ content: '✅ اخترت التخطي!', ephemeral: true });
+                    await channel.send(`⏭️ <@${v.user.id}> فضّل **تخطي** هذه الجولة نهاراً.`);
+                    return;
+                }
+
+                const tId = v.customId.replace('loop_vote_', '');
+                const count = votesMap.get(tId) || 0;
+                votesMap.set(tId, count + 1);
+                votedUsersSet.add(v.user.id);
+
+                const targetObj = currentAlive.find(p => (p.fakeId || p.id) === tId);
+                await v.reply({ content: `✅ صوتك اعتمد ضد ${targetObj.username}`, ephemeral: true });
+                await channel.send(`🎯 <@${v.user.id}> صوت ضد **${targetObj.username}**! [العداد الحالي: \`${count + 1}\` أصوات] 📈`);
+            });
+
+            collector.on('end', async () => {
+                let highestId = null; let maxVotes = 0;
+                for (const [id, count] of votesMap.entries()) {
+                    if (count > maxVotes) { maxVotes = count; highestId = id; }
+                }
+
+                if (highestId && maxVotes > 0) {
+                    const expelled = currentAlive.find(p => (p.fakeId || p.id) === highestId);
+                    if (expelled) {
+                        expelled.alive = false;
+                        await channel.send(`⚖️ **بأغلبية الأصوات الحرة، قررت المدينة إقصاء وإعدام: <@${expelled.id}> [${expelled.username}]! وعند كشف أوراقه اتضح أنه كان يحمل دور: ||${expelled.role}||**`);
+                    }
+                } else {
+                    await channel.send('⏭️ **انتهى النهار بتوافق الآراء على التخطي ولم يُطرد أحد في هذه الجولة المفتوحة!**');
+                }
+
+                // تقدم الجولة وإعادة الحلقة تلقائياً للاستمرار والتعاقب حتى الفوز الفعلي
+                activeMafiaGame.round += 1;
+                setTimeout(() => runGameLoop(channel), 5000);
+            });
+
+        }, 20000);
+
+    }, 10000);
+}
+
+// 5️⃣ باقي الأنظمة التفاعلية المحفوظة (Ticket, Giveaway, Vote, Games)
 client.on('interactionCreate', async interaction => {
     if (interaction.isChatInputCommand() && interaction.commandName === 'setup-ticket') {
         if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: '❌ للمدراء فقط!', ephemeral: true });
@@ -412,7 +483,7 @@ client.on('interactionCreate', async interaction => {
 
     const helpEmbed = new EmbedBuilder()
         .setTitle('🤖 قائمة تحكم وأنظمة البوت المائلة بالكامل')
-        .setDescription('**كل الميزات الشغالة والمحدثة بالنظام الجديد:**\n\n• 🛑 **الإدارة العليا (Admin)**\n └ `/dm user`, `/dm all`, `/setup-ticket`\n\n• 🎉 **المسابقات والفعاليات (Giveaway & Vote)**\n └ `/giveaway` (السحبات بالأزرار)، `/vote` (لوحات التصويت الحي)\n\n• 👥 **الألعاب والترفيه (Games)**\n └ `/mafia` (لعبة المافيا الكروية بالأمر المائل)، `/updates` (عرض كل ما هو جديد)، `/profile`, `/penalty`, `/guess-nationality`\n\n• 🎟️ **الاختصارات النصية المباشرة (Shortcuts)**\n └ `.w` (الترحيب الفوري وعرض الإمبيد)')
+        .setDescription('**كل الميزات الشغالة والمحدثة بالنظام الجديد:**\n\n• 🛑 **الإدارة العليا (Admin)**\n └ `/dm user`, `/dm all`, `/setup-ticket`\n\n• 🎉 **المسابقات والفعاليات (Giveaway & Vote)**\n └ `/giveaway` (السحبات بالأزرار)، `/vote` (لوحات التصويت الحي)\n\n• 👥 **الألعاب والترفيه (Games)**\n └ `/mafia` (لعبة المافيا التكرارية الكلاسيكية)، `/info` (دليل وشرح اللعبة المطور)، `/updates` (عرض التحديثات الجديدة والأنظمة المضافة)، `/profile`, `/penalty`, `/guess-nationality`\n\n• 🎟️ **الاختصارات النصية المباشرة (Shortcuts)**\n └ `.w` (الترحيب الفوري وعرض الإمبيد)')
         .setColor(0x5865F2)
         .setImage('https://images2.imgbox.com/71/34/4mP9Y7C1_o.png'); 
 
