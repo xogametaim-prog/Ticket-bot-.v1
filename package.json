@@ -1,14 +1,10 @@
 {
-  "name": "worldcup-2026-bot",
+  "name": "my-first-app",
   "version": "1.0.0",
-  "description": "Discord Bot for World Cup 2026 using Discord.js and SQLite",
+  "description": "مشروعي الأول باستخدام نود جي إس",
   "main": "main.js",
   "scripts": {
     "start": "node main.js"
   },
-  "dependencies": {
-    "better-sqlite3": "^11.0.0",
-    "discord.js": "^14.15.3",
-    "express": "^4.19.2"
-  }
+  "dependencies": {}
 }
