@@ -791,4 +791,254 @@ client.on('interactionCreate', async (interaction) => {
             const targetCh = options.getChannel('channel');
             try {
                 await targetCh.delete();
-                await interaction.reply({ content: `
+                await interaction.reply({ content: `✅ تم حذف الروم بنجاح!`, ephemeral: true });
+            } catch (e) {
+                await interaction.reply({ content: `❌ فشل حذف الروم: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        if (commandName === 'delete_all_roles') {
+            if (!isAdministrator) {
+                return interaction.reply({ content: '❌ هذا الأمر مخصص لمن يمتلكون صلاحية الإدارة (Administrator) فقط!', ephemeral: true });
+            }
+            await interaction.reply({ content: '⏳ جاري بدء حذف جميع الرتب في السيرفر...', ephemeral: true });
+            try {
+                const roles = await guild.roles.fetch();
+                for (const role of roles.values()) {
+                    if (role.id !== guild.roles.everyone.id && !role.managed && role.editable) {
+                        await role.delete().catch(() => {});
+                        await sleep(150);
+                    }
+                }
+                await interaction.followUp({ content: '✅ تم مسح كافة الرتب غير المحمية بنجاح!', ephemeral: true });
+            } catch (e) {
+                console.error(e);
+                await interaction.followUp({ content: `❌ حدث خطأ أثناء مسح الرتب: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        // أوامر التذاكر اليدوية
+        if (commandName === 'add') {
+            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
+                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
+            }
+            const targetMember = options.getMember('member');
+            try {
+                await channel.permissionOverwrites.edit(targetMember.id, {
+                    ViewChannel: true,
+                    SendMessages: true,
+                    ReadMessageHistory: true
+                });
+                await interaction.reply({ content: `✅ تم إضافة ${targetMember} إلى التذكرة الحالية بنجاح.` });
+            } catch (e) {
+                await interaction.reply({ content: `❌ حدث خطأ أثناء الإضافة: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        if (commandName === 'remove') {
+            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
+                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
+            }
+            const targetMember = options.getMember('member');
+            try {
+                await channel.permissionOverwrites.delete(targetMember.id);
+                await interaction.reply({ content: `✅ تم إزالة ${targetMember} من التذكرة بنجاح.` });
+            } catch (e) {
+                await interaction.reply({ content: `❌ حدث خطأ أثناء الإزالة: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        if (commandName === 'claim') {
+            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
+                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
+            }
+            if (!isStaffOrAdmin(member)) {
+                return interaction.reply({ content: '❌ هذا الأمر مخصص فقط لطاقم العمل والإدارة.', ephemeral: true });
+            }
+            const staffRole = guild.roles.cache.find(r => r.name === 'Staff');
+            try {
+                if (staffRole) {
+                    await channel.permissionOverwrites.edit(staffRole.id, { ViewChannel: false });
+                }
+                await channel.permissionOverwrites.edit(interaction.user.id, {
+                    ViewChannel: true,
+                    SendMessages: true,
+                    ReadMessageHistory: true
+                });
+                await interaction.reply({ content: `💼 تم استلام التذكرة الحالية بواسطة ${interaction.user}.` });
+            } catch (e) {
+                await interaction.reply({ content: `❌ فشل استلام التذكرة: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        if (commandName === 'unclaim') {
+            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
+                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
+            }
+            if (!isStaffOrAdmin(member)) {
+                return interaction.reply({ content: '❌ هذا الأمر مخصص فقط لطاقم العمل والإدارة.', ephemeral: true });
+            }
+            const staffRole = guild.roles.cache.find(r => r.name === 'Staff');
+            try {
+                if (staffRole) {
+                    await channel.permissionOverwrites.edit(staffRole.id, { ViewChannel: true });
+                }
+                await interaction.reply({ content: `🔓 تم إلغاء الاستلام، وأصبحت التذكرة متاحة مجدداً لكافة المشرفين.` });
+            } catch (e) {
+                await interaction.reply({ content: `❌ فشل إلغاء الاستلام: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        if (commandName === 'rename') {
+            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
+                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
+            }
+            if (!isStaffOrAdmin(member)) {
+                return interaction.reply({ content: '❌ هذا الأمر مخصص فقط لطاقم العمل والإدارة.', ephemeral: true });
+            }
+            const newName = options.getString('name');
+            try {
+                await channel.setName(newName);
+                await interaction.reply({ content: `✅ تم إعادة تسمية التذكرة بنجاح إلى: **${newName}**` });
+            } catch (e) {
+                await interaction.reply({ content: `❌ فشل إعادة التسمية: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        if (commandName === 'close') {
+            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
+                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
+            }
+            if (!isStaffOrAdmin(member)) {
+                return interaction.reply({ content: '❌ لا يمكنك إغلاق التذكرة، الإغلاق مخصص للإدارة وطاقم العمل فقط.', ephemeral: true });
+            }
+            await interaction.reply({ content: 'سيتم إغلاق وحذف التذكرة خلال 5 ثوانٍ...', ephemeral: false });
+            setTimeout(async () => {
+                try {
+                    await channel.delete();
+                } catch (e) {
+                    console.error('Failed to delete channel:', e);
+                }
+            }, 5000);
+        }
+
+        // تهيئة السيرفر بالكامل مع 100 رتبة وتوزيع الصلاحيات الصارمة
+        if (commandName === 'setup_server') {
+            if (!isAdministrator) {
+                return interaction.reply({ content: '❌ هذا الأمر مخصص لمن يمتلكون صلاحية الإدارة (Administrator) فقط!', ephemeral: true });
+            }
+            await interaction.reply({ content: '⏳ جاري بدء تهيئة السيرفر بالكامل وتنسيق الرومات وإنشاء 100 رتبة متنوعة، يرجى الانتظار...', ephemeral: true });
+
+            try {
+                // 1. إنشاء رتب الإدارة الخمسين (50 Management Roles)
+                const createdManagementRoles = {};
+                for (const roleName of MANAGEMENT_ROLES) {
+                    const role = await guild.roles.create({ name: roleName, color: 0x3498DB });
+                    createdManagementRoles[roleName] = role;
+                    await sleep(150);
+                }
+
+                // 2. إنشاء رتب الأعضاء الخمسين (50 Member Roles)
+                for (const roleName of MEMBER_ROLES) {
+                    // how
+                    // 
+                    // for items
+                    await guild.roles.create({ name: roleName, color: 0x2ECC71 });
+                    await sleep(150);
+                }
+
+                const ownerRole = createdManagementRoles["Owner"];
+                const highAdminRole = createdManagementRoles["High Admin"];
+                const adminRole = createdManagementRoles["Admin"];
+                const staffRole = createdManagementRoles["Staff"];
+                const middlemanRole = createdManagementRoles["Middleman (الوسيط)"];
+                const mmManagerRole = createdManagementRoles["Middleman Manager"];
+
+                // 3. البدء في إنشاء الرومات مع تطبيق الصلاحيات بشكل صارم ومنع التداخل
+                for (const group of STRUCTURE) {
+                    let category = null;
+                    let overwrites = [];
+
+                    if (group.category === "👑 | Owner") {
+                        overwrites = [
+                            { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
+                        ];
+                        if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                    } else if (group.category === "🛠️ | Staff" || group.category === "🛠️ | Logo") {
+                        overwrites = [
+                            { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
+                        ];
+                        if (staffRole) overwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                        if (adminRole) overwrites.push({ id: adminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                        if (highAdminRole) overwrites.push({ id: highAdminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                        if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                    } else if (group.category === "⚖️ | BRQ - Meditators") {
+                        overwrites = [
+                            { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
+                        ];
+                        if (middlemanRole) overwrites.push({ id: middlemanRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                        if (mmManagerRole) overwrites.push({ id: mmManagerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                        if (staffRole) overwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                        if (adminRole) overwrites.push({ id: adminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                        if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                    }
+
+                    if (group.category) {
+                        category = await guild.channels.create({
+                            name: group.category,
+                            type: ChannelType.GuildCategory,
+                            permissionOverwrites: overwrites
+                        });
+                        await sleep(500);
+                    }
+
+                    for (const ch of group.channels) {
+                        await guild.channels.create({
+                            name: ch.name,
+                            type: ch.type === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText,
+                            parent: category ? category.id : null,
+                            userLimit: ch.userLimit || undefined,
+                            permissionOverwrites: category ? category.permissionOverwrites.cache.map(o => o) : []
+                        });
+                        await sleep(500);
+                    }
+                }
+
+                await interaction.followUp({ content: '✅ تم الانتهاء من إعداد الرومات وتوزيع الصلاحيات وإنشاء 100 رتبة بدقة تامة!', ephemeral: true });
+
+            } catch (e) {
+                console.error(e);
+                await interaction.followUp({ content: `❌ حدث خطأ أثناء إعداد الرومات: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        if (commandName === 'setup_ticket') {
+            if (!isAdministrator) {
+                return interaction.reply({ content: '❌ هذا الأمر مخصص لمن يمتلكون صلاحية الإدارة (Administrator) فقط!', ephemeral: true });
+            }
+
+            const embed = new EmbedBuilder()
+                .setTitle('تذكرة الدعم الفني | Tickets Panel 🎫')
+                .setDescription('إذا كنت تواجه مشكلة، أو ترغب بتقديم شكوى أو استفسار، يرجى فتح تذكرة عبر الضغط على الزر أدناه وسيقوم فريق العمل بتقديم المساعدة.')
+                .setColor(0x0099FF)
+                .setFooter({ text: 'نظام تذاكر سيرفر BRQ Community' });
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('create_ticket_btn')
+                    .setLabel('إنشاء تذكرة 🎫')
+                    .setStyle(ButtonStyle.Success)
+            );
+
+            try {
+                await interaction.channel.send({ embeds: [embed], components: [row] });
+                await interaction.reply({ content: '✅ تم إرسال لوحة التحكم بالتذاكر بنجاح!', ephemeral: true });
+            } catch (e) {
+                await interaction.reply({ content: `❌ حدث خطأ أثناء إرسال اللوحة: ${e.message}`, ephemeral: true });
+            }
+        }
+    }
+});
+
+const TOKEN = process.env.DISCORD_TOKEN || 'ضع_توكن_البوت_الخاص_بِك_هنا';
+client.login(TOKEN);
