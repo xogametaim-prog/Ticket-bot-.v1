@@ -61,7 +61,7 @@ const userSchema = new mongoose.Schema({
 });
 const UserLevelModel = mongoose.model('UserLevel', userSchema);
 
-// هيكل إعدادات السيرفر (غرفة الإشعارات ومكافآت الرتب) لـ MongoDB
+// هيكل إعدادات السيرفر لـ MongoDB
 const configSchema = new mongoose.Schema({
     guildId: String,
     levelChannelId: String,
@@ -137,7 +137,7 @@ async function saveGuildConfig(guildId, configData) {
     }
 }
 
-// التحقق مما إذا كان المستخدم من طاقم الإدارة (Staff فما فوق)
+// التحقق مما إذا كان المستخدم يمتلك صلاحية الإدارة (Administrator) تلقائياً
 function isStaffOrAdmin(member) {
     if (member.permissions.has(PermissionFlagsBits.Administrator)) return true;
     const managementRoles = ["Staff", "Admin", "High Admin", "Owner", "Co-Owner", "Founder", "Staff Supervisor", "Supervisor"];
@@ -331,120 +331,7 @@ const MEMBER_ROLES = [
     "Level 27 Member", "Level 28 Member", "Level 29 Member"
 ];
 
-client.once('ready', async () => {
-    console.log(`تم تسجيل الدخول بنجاح كـ: ${client.user.tag}`);
-    
-    const commands = [
-        {
-            name: 'ban',
-            description: 'حظر عضو من السيرفر',
-            options: [
-                { name: 'member', type: 6, description: 'العضو المراد حظره', required: true },
-                { name: 'reason', type: 3, description: 'السبب', required: false }
-            ]
-        },
-        {
-            name: 'timeout',
-            description: 'إعطاء تايم أوت (كتم مؤقت) لعضو في السيرفر',
-            options: [
-                { name: 'member', type: 6, description: 'العضو المراد كتمه', required: true },
-                { name: 'minutes', type: 4, description: 'المدة بالدقائق', required: true },
-                { name: 'reason', type: 3, description: 'السبب', required: false }
-            ]
-        },
-        {
-            name: 'setup_server',
-            description: 'إنشاء رومات وقنوات السيرفر وتطبيق الصلاحيات وإنشاء 100 رتبة متنوعة'
-        },
-        {
-            name: 'setup_ticket',
-            description: 'إرسال لوحة التحكم بنظام التذاكر'
-        },
-        {
-            name: 'delete_all_channels',
-            description: 'حذف جميع رومات وقنوات السيرفر بالكامل (للإداريين فقط)'
-        },
-        {
-            name: 'delete_channel',
-            description: 'حذف روم معين يدوياً (للإداريين فقط)',
-            options: [
-                { name: 'channel', type: 7, description: 'الروم المراد حذفه', required: true }
-            ]
-        },
-        {
-            name: 'delete_all_roles',
-            description: 'حذف جميع الرتب الموجودة في السيرفر باستثناء رتبة البوت (للإداريين فقط)'
-        },
-        {
-            name: 'publish_rules',
-            description: 'نشر قوانين وإرشادات السيرفر في الروم المخصص (للإداريين فقط)'
-        },
-        {
-            name: 'rank',
-            description: 'عرض بطاقة المستوى وعدد رسائل العضو الحالية بشكل مصور',
-            options: [
-                { name: 'user', type: 6, description: 'العضو المراد عرض مستواه (اختياري)', required: false }
-            ]
-        },
-        {
-            name: 'set_level_channel',
-            description: 'تحديد الغرفة المخصصة لإشعارات وصور زيادة المستويات (للإداريين فقط)',
-            options: [
-                { name: 'channel', type: 7, description: 'الغرفة المخصصة للإشعارات', required: true }
-            ]
-        },
-        {
-            name: 'add_role_reward',
-            description: 'ربط رتبة بعدد رسائل محدد للحصول عليها تلقائياً (للإداريين فقط)',
-            options: [
-                { name: 'role', type: 8, description: 'الرتبة المراد منحها كهدية', required: true },
-                { name: 'messages_needed', type: 4, description: 'عدد الرسائل المطلوبة للحصول على الرتبة', required: true }
-            ]
-        },
-        {
-            name: 'add',
-            description: 'إضافة عضو معين إلى التذكرة الحالية',
-            options: [
-                { name: 'member', type: 6, description: 'العضو المراد إضافته', required: true }
-            ]
-        },
-        {
-            name: 'remove',
-            description: 'إزالة عضو معين من التذكرة الحالية',
-            options: [
-                { name: 'member', type: 6, description: 'العضو المراد إزالته', required: true }
-            ]
-        },
-        {
-            name: 'claim',
-            description: 'استلام التذكرة الحالية وتخصيصها لك فقط كعضو إدارة'
-        },
-        {
-            name: 'unclaim',
-            description: 'إلغاء استلام التذكرة وإتاحتها مجدداً لكافة أعضاء الإدارة'
-        },
-        {
-            name: 'rename',
-            description: 'إعادة تسمية التذكرة الحالية',
-            options: [
-                { name: 'name', type: 3, description: 'الاسم الجديد للتذكرة', required: true }
-            ]
-        },
-        {
-            name: 'close',
-            description: 'إغلاق وحذف التذكرة الحالية'
-        }
-    ];
-
-    try {
-        await client.application.commands.set(commands);
-        console.log('تمت مزامنة جميع أوامر السلاش بنجاح.');
-    } catch (error) {
-        console.error('فشلت عملية تسجيل الأوامر:', error);
-    }
-});
-
-// التعامل مع الرسائل: نظام الردود التلقائية والخبرة ومكافآت الرتب
+// معالجة الرسائل: نظام الردود التلقائية والخبرة ومكافآت الرتب
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
@@ -452,7 +339,7 @@ client.on('messageCreate', async (message) => {
     const guildId = message.guild.id;
     const userId = message.author.id;
 
-    // 1. نظام الردود التلقائية التفاعلية المطلوبة بدقة
+    // 1. نظام الردود التلقائية
     if (trimmedMsg === "سلام عليكم") {
         return message.reply("و عليكم السلام ورحمه الله وبركاته").catch(() => {});
     } else if (trimmedMsg === "باك") {
@@ -467,20 +354,18 @@ client.on('messageCreate', async (message) => {
         const userData = await getUserData(guildId, userId);
         userData.messageCount += 1;
         
-        // إضافة نقاط خبرة عشوائية (بين 10 و 20) مع كل رسالة تفاعلية
         const xpToAdd = Math.floor(Math.random() * 11) + 10;
         userData.xp += xpToAdd;
 
         const xpNeeded = userData.level * 150;
         
-        // إذا زاد مستوى العضو في السيرفر (Level Up)
+        // إذا زاد مستوى العضو (Level Up)
         if (userData.xp >= xpNeeded) {
             const oldLevel = userData.level;
             userData.xp -= xpNeeded;
             userData.level += 1;
             const newLevel = userData.level;
 
-            // جلب الغرفة المخصصة لإرسال إشعار زيادة المستوى
             const config = await getGuildConfig(guildId);
             let announceChannel = message.channel;
             if (config.levelChannelId) {
@@ -488,72 +373,75 @@ client.on('messageCreate', async (message) => {
                 if (targetChannel) announceChannel = targetChannel;
             }
 
-            // رسم وتوليد صورة الترقية المتقدمة والمصقولة
+            // رسم بطاقة الترقية بالخلفية المرفقة (1280x543)
             try {
-                const canvas = createCanvas(800, 250);
+                const canvas = createCanvas(1280, 543);
                 const ctx = canvas.getContext('2d');
 
-                // تدرج لوني داكن وأنيق للخلفية
-                const gradient = ctx.createLinearGradient(0, 0, 800, 250);
-                gradient.addColorStop(0, '#0f172a');
-                gradient.addColorStop(1, '#1e1b4b');
-                ctx.fillStyle = gradient;
-                ctx.fillRect(0, 0, 800, 250);
+                const bg = await loadImage('./input_file_22.jpeg').catch(() => null);
+                if (bg) {
+                    ctx.drawImage(bg, 0, 0, 1280, 543);
+                } else {
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillRect(0, 0, 1280, 543);
+                }
 
-                // تأثير توهج مشع خلف الصورة الشخصية
-                ctx.shadowColor = '#fbbf24';
-                ctx.shadowBlur = 18;
+                ctx.shadowColor = '#a855f7';
+                ctx.shadowBlur = 20;
 
-                // رسم صورة الحساب بشكل دائري
                 const avatarUrl = message.author.displayAvatarURL({ extension: 'png', size: 128 });
                 const avatarImage = await loadImage(avatarUrl).catch(() => null);
 
                 ctx.save();
                 ctx.beginPath();
-                ctx.arc(110, 125, 65, 0, Math.PI * 2, true);
+                ctx.arc(190, 271.5, 95, 0, Math.PI * 2, true);
                 ctx.closePath();
                 ctx.clip();
                 
                 if (avatarImage) {
-                    ctx.drawImage(avatarImage, 45, 60, 130, 130);
+                    ctx.drawImage(avatarImage, 95, 176.5, 190, 190);
                 } else {
                     ctx.fillStyle = '#475569';
                     ctx.fill();
                 }
                 ctx.restore();
 
-                // إزالة التوهج للنصوص
                 ctx.shadowBlur = 0;
 
-                // كتابة تفاصيل الترقية والمستوى السابق والجديد بدقة
-                ctx.fillStyle = '#fbbf24';
-                ctx.font = 'bold 36px sans-serif';
-                ctx.fillText('ترقية تفاعلية جديدة! 🎉', 210, 85);
-
+                // البيانات على الصورة بدقة ووضوح تام
                 ctx.fillStyle = '#FFFFFF';
-                ctx.font = 'bold 22px sans-serif';
-                ctx.fillText(`لقد كنت في مستوى ${oldLevel} وأصبحت الآن في مستوى ${newLevel}`, 210, 140);
+                ctx.font = 'bold 44px sans-serif';
+                ctx.fillText('ترقية تفاعلية جديدة! 🎉', 360, 160);
+
+                ctx.fillStyle = '#c084fc';
+                ctx.font = 'bold 32px sans-serif';
+                ctx.fillText(`المستوى السابق: ${oldLevel} ➡️ المستوى الحالي: ${newLevel}`, 360, 240);
 
                 ctx.fillStyle = '#94a3b8';
-                ctx.font = '20px sans-serif';
-                ctx.fillText(`الرتبة السابقة: Level ${oldLevel}`, 210, 185);
-                ctx.fillText(`الرتبة الجديدة: Level ${newLevel}`, 210, 220);
+                ctx.font = '24px sans-serif';
+                ctx.fillText(`اسم العضو: ${message.author.username}`, 360, 310);
+                ctx.fillText(`إجمالي الرسائل: ${userData.messageCount}`, 360, 370);
+
+                // كتابة الآي دي في الأعلى بشكل منسق
+                ctx.fillStyle = '#a855f7';
+                ctx.font = 'bold 22px sans-serif';
+                ctx.fillText(`ID: ${userId}`, 980, 60);
 
                 const buffer = canvas.toBuffer('image/png');
                 const attachment = new AttachmentBuilder(buffer, { name: `levelup-${userId}.png` });
 
                 await announceChannel.send({ 
-                    content: `🎉 مبارك للرائع ${message.author}! لقد ارتفع مستواك التفاعلي في السيرفر!`,
+                    content: `🎉 **تهانينا للتفاعل المميز!**\nلقد كنت في مستوى **${oldLevel}** وأصبحت الآن في مستوى **${newLevel}**!\nالرتبة التفاعلية السابقة: **Level ${oldLevel}** ➡️ الرتبة الجديدة: **Level ${newLevel}**`,
                     files: [attachment] 
                 }).catch(() => {});
 
             } catch (err) {
-                console.error('Error drawing levelup image:', err);
+                console.error(err);
                 await announceChannel.send(`🎉 تهانينا ${message.author}! لقد كنت في مستوى **${oldLevel}** وأصبحت الآن في مستوى **${newLevel}**!`).catch(() => {});
             }
         }
 
-        // 2. التحقق من مكافآت الرتب بناءً على عدد رسائل العضو
+        // 2. التحقق من مكافآت الرتب التلقائية بمعدل الرسائل
         const config = await getGuildConfig(guildId);
         if (config && config.roleRewards && config.roleRewards.length > 0) {
             for (const reward of config.roleRewards) {
@@ -564,7 +452,7 @@ client.on('messageCreate', async (message) => {
                             await message.member.roles.add(role);
                             await message.channel.send(`🎉 مبارك <@${userId}>! لقد حصلت على رتبة **${role.name}** لمشاركتك المتميزة ووصولك لـ **${reward.messagesNeeded}** رسالة!`);
                         } catch (e) {
-                            console.error(`Failed to assign reward role ${role.name}:`, e);
+                            console.error(e);
                         }
                     }
                 }
@@ -573,13 +461,13 @@ client.on('messageCreate', async (message) => {
 
         await saveUserData(guildId, userId, userData);
     } catch (e) {
-        console.error('Error handling messaging XP/rewards:', e);
+        console.error(e);
     }
 });
 
 client.on('interactionCreate', async (interaction) => {
     
-    // 1. التفاعل مع أزرار التذاكر
+    // 1. التفاعل مع الأزرار الثلاثية للتذكرة
     if (interaction.isButton()) {
         const { guild, member, customId, channel } = interaction;
 
@@ -793,6 +681,37 @@ client.on('interactionCreate', async (interaction) => {
 
         const isAdministrator = member.permissions.has(PermissionFlagsBits.Administrator);
 
+        // أمر المساعدة الشامل والمقسم بدقة (Help Command)
+        if (commandName === 'help') {
+            const embed = new EmbedBuilder()
+                .setTitle('دليل وأوامر بوت سيرفر BRQ Community 🤖')
+                .setDescription('مرحباً بك في قائمة المساعدة المخصصة للتحكم بكافة أنظمة البوت.')
+                .setColor(0xa855f7)
+                .setThumbnail(guild.iconURL({ dynamic: true }) || null)
+                .addFields(
+                    { 
+                        name: '🛡️ أوامر الإدارة العامة', 
+                        value: '`/setup_server` • لتهيئة السيرفر وإنشاء الرومات والرتب.\n`/setup_ticket` • لإرسال بانل التذاكر التفاعلي.\n`/delete_all_channels` • لمسح كافة الرومات بالسيرفر يدوياً.\n`/delete_channel` • لحذف روم محدد.\n`/delete_all_roles` • لمسح جميع الرتب التلقائية بالسيرفر.\n`/publish_rules` • لنشر قوانين السيرفر كبطاقة إمبد.' 
+                    },
+                    { 
+                        name: '📊 أوامر التفاعل والمستويات', 
+                        value: '`/rank` • لعرض بطاقة المستوى وعدد رسائل العضو كصورة مخصصة.\n`/set_level_channel` • لتخصيص روم إشعارات زيادة المستوى.\n`/add_role_reward` • لربط رتبة بعدد رسائل محدد للأعضاء.' 
+                    },
+                    { 
+                        name: '🎫 أوامر نظام التذاكر', 
+                        value: '`/add` • لإدخال عضو للتذكرة.\n`/remove` • لإزالة عضو من التذكرة.\n`/claim` • لاستلام تذكرة لمتابعتها.\n`/unclaim` • لترك التذكرة ليعود المشرفين لاستلامها.\n`/rename` • لتعديل اسم روم التذكرة.\n`/close` • لإغلاق وحذف التذكرة الحالية.' 
+                    },
+                    { 
+                        name: '🔨 أوامر الإشراف الأساسية', 
+                        value: '`/ban` • لحظر عضو من السيرفر.\n`/timeout` • لإعطاء تايم أوت (كتم مؤقت) لعضو.' 
+                    }
+                )
+                .setFooter({ text: 'تمت برمجة البوت وتطويره بالكامل بواسطة محقق كونان 🔎' })
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed] });
+        }
+
         // أمر استخراج بطاقة العضو التفاعلية والمصورة
         if (commandName === 'rank') {
             await interaction.deferReply();
@@ -808,29 +727,47 @@ client.on('interactionCreate', async (interaction) => {
                 const userData = await getUserData(guild.id, targetUser.id);
                 const nextLevelXP = userData.level * 150;
 
-                const canvas = createCanvas(800, 250);
+                // جلب الجائزة القادمة وحساب المتبقي من الرسائل
+                const config = await getGuildConfig(guild.id);
+                let rewardStatusText = 'لا توجد رتب مكافآت متبقية (أنت في القمة! 👑)';
+                if (config && config.roleRewards && config.roleRewards.length > 0) {
+                    // ترتيب المكافآت لمعرفة أقرب واحدة
+                    const sortedRewards = [...config.roleRewards].sort((a, b) => a.messagesNeeded - b.messagesNeeded);
+                    const nextReward = sortedRewards.find(r => userData.messageCount < r.messagesNeeded);
+                    if (nextReward) {
+                        const remaining = nextReward.messagesNeeded - userData.messageCount;
+                        const role = guild.roles.cache.get(nextReward.roleId);
+                        const roleName = role ? role.name : 'رتبة تفاعلية';
+                        rewardStatusText = `بقي ${remaining} رسالة للوصول إلى مكافأة: [ ${roleName} ]`;
+                    }
+                }
+
+                // إنشاء لوحة الرسم بأبعاد الصورة المرفقة تماماً (1280x543)
+                const canvas = createCanvas(1280, 543);
                 const ctx = canvas.getContext('2d');
 
-                const gradient = ctx.createLinearGradient(0, 0, 800, 250);
-                gradient.addColorStop(0, '#111726');
-                gradient.addColorStop(1, '#1e293b');
-                ctx.fillStyle = gradient;
-                ctx.fillRect(0, 0, 800, 250);
+                const bg = await loadImage('./input_file_22.jpeg').catch(() => null);
+                if (bg) {
+                    ctx.drawImage(bg, 0, 0, 1280, 543);
+                } else {
+                    ctx.fillStyle = '#111726';
+                    ctx.fillRect(0, 0, 1280, 543);
+                }
 
                 ctx.shadowColor = '#00ffff';
-                ctx.shadowBlur = 15;
+                ctx.shadowBlur = 20;
 
                 const avatarUrl = targetUser.displayAvatarURL({ extension: 'png', size: 128 });
                 const avatarImage = await loadImage(avatarUrl).catch(() => null);
 
                 ctx.save();
                 ctx.beginPath();
-                ctx.arc(110, 125, 65, 0, Math.PI * 2, true);
+                ctx.arc(190, 271.5, 95, 0, Math.PI * 2, true);
                 ctx.closePath();
                 ctx.clip();
                 
                 if (avatarImage) {
-                    ctx.drawImage(avatarImage, 45, 60, 130, 130);
+                    ctx.drawImage(avatarImage, 95, 176.5, 190, 190);
                 } else {
                     ctx.fillStyle = '#475569';
                     ctx.fill();
@@ -839,36 +776,47 @@ client.on('interactionCreate', async (interaction) => {
 
                 ctx.shadowBlur = 0;
 
+                // كتابة تفاصيل المستوى وعدد الرسائل الحالية بشكل منسق جداً
                 ctx.fillStyle = '#FFFFFF';
-                ctx.font = 'bold 32px sans-serif';
-                ctx.fillText(targetUser.username, 210, 75);
+                ctx.font = 'bold 38px sans-serif';
+                ctx.fillText(targetUser.username, 360, 130);
 
                 ctx.fillStyle = '#38bdf8';
-                ctx.font = '22px sans-serif';
-                ctx.fillText(`المستوى: ${userData.level}`, 210, 120);
+                ctx.font = '24px sans-serif';
+                ctx.fillText(`المستوى الحالي: ${userData.level}`, 360, 195);
 
                 ctx.fillStyle = '#94a3b8';
-                ctx.fillText(`الخبرة الحالية: ${userData.xp} / ${nextLevelXP} XP`, 210, 155);
-                ctx.fillText(`إجمالي الرسائل: ${userData.messageCount} رسالة`, 210, 190);
+                ctx.fillText(`الخبرة التراكمية: ${userData.xp} / ${nextLevelXP} XP`, 360, 255);
+                ctx.fillText(`مجموع رسائل اليوم الكلي: ${userData.messageCount} رسالة`, 360, 315);
 
-                const barWidth = 530;
-                const barHeight = 16;
-                const barX = 210;
-                const barY = 210;
+                ctx.fillStyle = '#22d3ee';
+                ctx.font = 'bold 20px sans-serif';
+                ctx.fillText(rewardStatusText, 360, 375);
 
-                ctx.fillStyle = '#334155';
+                // كتابة آي دي العضو في أعلى جهة اليمين
+                ctx.fillStyle = '#a855f7';
+                ctx.font = 'bold 22px sans-serif';
+                ctx.fillText(`ID: ${targetUser.id}`, 980, 60);
+
+                // رسم شريط التقدم للخبرة (Progress Bar)
+                const barWidth = 850;
+                const barHeight = 24;
+                const barX = 360;
+                const barY = 430;
+
+                ctx.fillStyle = '#1e293b';
                 ctx.beginPath();
-                ctx.roundRect(barX, barY, barWidth, barHeight, 8);
+                ctx.roundRect(barX, barY, barWidth, barHeight, 10);
                 ctx.fill();
 
                 const progressPercent = Math.min(userData.xp / nextLevelXP, 1);
                 if (progressPercent > 0) {
                     const progressGradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
-                    progressGradient.addColorStop(0, '#0284c7');
-                    progressGradient.addColorStop(1, '#06b6d4');
+                    progressGradient.addColorStop(0, '#0ea5e9');
+                    progressGradient.addColorStop(1, '#a855f7');
                     ctx.fillStyle = progressGradient;
                     ctx.beginPath();
-                    ctx.roundRect(barX, barY, barWidth * progressPercent, barHeight, 8);
+                    ctx.roundRect(barX, barY, barWidth * progressPercent, barHeight, 10);
                     ctx.fill();
                 }
 
@@ -879,7 +827,7 @@ client.on('interactionCreate', async (interaction) => {
 
             } catch (err) {
                 console.error(err);
-                await interaction.followUp({ content: '❌ حدث خطأ غير متوقع أثناء معالجة ورسم بطاقة الرتبة.' });
+                await interaction.followUp({ content: '❌ حدث خطأ غير متوقع أثناء رسم بطاقة الرتبة.' });
             }
         }
 
@@ -912,7 +860,6 @@ client.on('interactionCreate', async (interaction) => {
                 const config = await getGuildConfig(guild.id);
                 if (!config.roleRewards) config.roleRewards = [];
                 
-                // مسح الرتبة إن كانت موجودة مسبقاً لمنع التكرار
                 config.roleRewards = config.roleRewards.filter(r => r.roleId !== targetRole.id);
                 config.roleRewards.push({ roleId: targetRole.id, messagesNeeded });
                 
@@ -955,275 +902,192 @@ client.on('interactionCreate', async (interaction) => {
 
             await interaction.showModal(modal);
         }
+    }
+});
 
-        // أوامر الإداريين
-        if (commandName === 'delete_all_channels') {
-            if (!isAdministrator) {
-                return interaction.reply({ content: '❌ هذا الأمر مخصص لمن يمتلكون صلاحية الإدارة (Administrator) فقط!', ephemeral: true });
+// جلب إعدادات العضو أو السيرفر الافتراضية
+async function getGuildConfig(guildId) {
+    if (useMongoDB) {
+        let config = await GuildConfigModel.findOne({ guildId });
+        if (!config) {
+            config = new GuildConfigModel({ guildId, levelChannelId: null, roleRewards: [] });
+            await config.save();
+        }
+        return config;
+    } else {
+        if (!localDatabase[guildId]) localDatabase[guildId] = {};
+        if (!localDatabase[guildId].config) {
+            localDatabase[guildId].config = { levelChannelId: null, roleRewards: [] };
+        }
+        return localDatabase[guildId].config;
+    }
+}
+
+// حفظ الإعدادات الافتراضية
+async function saveGuildConfig(guildId, configData) {
+    if (useMongoDB) {
+        await GuildConfigModel.updateOne({ guildId }, {
+            levelChannelId: configData.levelChannelId,
+            roleRewards: configData.roleRewards
+        });
+    } else {
+        localDatabase[guildId].config = configData;
+        fs.writeFileSync('./database.json', JSON.stringify(localDatabase, null, 2));
+    }
+}
+
+// أمر التهيئة الكامل لإنشاء الرومات و 100 رتبة وتوزيع الصلاحيات الصارمة ونشر إرشادات المستويات التلقائية للجميع
+client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
+    const { commandName, guild, member } = interaction;
+    const isAdministrator = member.permissions.has(PermissionFlagsBits.Administrator);
+
+    if (commandName === 'setup_server') {
+        if (!isAdministrator) {
+            return interaction.reply({ content: '❌ هذا الأمر مخصص لمن يمتلكون صلاحية الإدارة (Administrator) فقط!', ephemeral: true });
+        }
+        await interaction.reply({ content: '⏳ جاري بدء تهيئة السيرفر بالكامل وتنسيق الرومات وإنشاء 100 رتبة وتوزيع الصلاحيات، يرجى الانتظار...', ephemeral: true });
+
+        try {
+            // 1. إنشاء رتب الإدارة الخمسين (50 Management Roles)
+            const createdManagementRoles = {};
+            for (const roleName of MANAGEMENT_ROLES) {
+                const role = await guild.roles.create({ name: roleName, color: 0x3498DB });
+                createdManagementRoles[roleName] = role;
+                await sleep(150);
             }
-            await interaction.reply({ content: '⏳ جاري بدء مسح كافة القنوات والرومات في السيرفر...', ephemeral: true });
-            try {
-                const channels = await guild.channels.fetch();
-                for (const ch of channels.values()) {
-                    if (ch) await ch.delete().catch(() => {});
+
+            // 2. إنشاء رتب الأعضاء الخمسين (50 Member Roles)
+            const createdMemberRoles = {};
+            for (const roleName of MEMBER_ROLES) {
+                // how
+                // 
+                // for items
+                const role = await guild.roles.create({ name: roleName, color: 0x2ECC71 });
+                createdMemberRoles[roleName] = role;
+                await sleep(150);
+            }
+
+            const ownerRole = createdManagementRoles["Owner"];
+            const highAdminRole = createdManagementRoles["High Admin"];
+            const adminRole = createdManagementRoles["Admin"];
+            const staffRole = createdManagementRoles["Staff"];
+            const middlemanRole = createdManagementRoles["Middleman (الوسيط)"];
+            const mmManagerRole = createdManagementRoles["Middleman Manager"];
+
+            // 3. البدء في إنشاء الرومات مع تطبيق الصلاحيات بشكل صارم ومنع التداخل
+            for (const group of STRUCTURE) {
+                let category = null;
+                let overwrites = [];
+
+                if (group.category === "👑 | Owner") {
+                    overwrites = [
+                        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
+                    ];
+                    if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                } else if (group.category === "🛠️ | Staff" || group.category === "🛠️ | Logo") {
+                    overwrites = [
+                        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
+                    ];
+                    if (staffRole) overwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                    if (adminRole) overwrites.push({ id: adminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                    if (highAdminRole) overwrites.push({ id: highAdminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                    if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                } else if (group.category === "⚖️ | BRQ - Meditators") {
+                    overwrites = [
+                        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
+                    ];
+                    if (middlemanRole) overwrites.push({ id: middlemanRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                    if (mmManagerRole) overwrites.push({ id: mmManagerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                    if (staffRole) overwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                    if (adminRole) overwrites.push({ id: adminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+                    if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
                 }
-            } catch (e) {
-                console.error(e);
-            }
-        }
 
-        if (commandName === 'delete_channel') {
-            if (!isAdministrator) {
-                return interaction.reply({ content: '❌ هذا الأمر مخصص لمن يمتلكون صلاحية الإدارة (Administrator) فقط!', ephemeral: true });
-            }
-            const targetCh = options.getChannel('channel');
-            try {
-                await targetCh.delete();
-                await interaction.reply({ content: `✅ تم حذف الروم بنجاح!`, ephemeral: true });
-            } catch (e) {
-                await interaction.reply({ content: `❌ فشل حذف الروم: ${e.message}`, ephemeral: true });
-            }
-        }
+                if (group.category) {
+                    category = await guild.channels.create({
+                        name: group.category,
+                        type: ChannelType.GuildCategory,
+                        permissionOverwrites: overwrites
+                    });
+                    await sleep(500);
+                }
 
-        if (commandName === 'delete_all_roles') {
-            if (!isAdministrator) {
-                return interaction.reply({ content: '❌ هذا الأمر مخصص لمن يمتلكون صلاحية الإدارة (Administrator) فقط!', ephemeral: true });
+                for (const ch of group.channels) {
+                    await guild.channels.create({
+                        name: ch.name,
+                        type: ch.type === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText,
+                        parent: category ? category.id : null,
+                        userLimit: ch.userLimit || undefined,
+                        permissionOverwrites: category ? category.permissionOverwrites.cache.map(o => o) : []
+                    });
+                    await sleep(500);
+                }
             }
-            await interaction.reply({ content: '⏳ جاري بدء حذف جميع الرتب في السيرفر...', ephemeral: true });
-            try {
-                const roles = await guild.roles.fetch();
-                for (const role of roles.values()) {
-                    if (role.id !== guild.roles.everyone.id && !role.managed && role.editable) {
-                        await role.delete().catch(() => {});
-                        await sleep(150);
+
+            // 4. تهيئة وضبط مكافآت الرتب التلقائية فوراً وحفظها في قاعدة البيانات
+            const config = await getGuildConfig(guild.id);
+            config.roleRewards = [];
+
+            // خريطة بمكافآت الرتب التلقائية الافتراضية المناسبة للأعضاء
+            const defaultRewardsLayout = [
+                { name: "Level 1 Member", messages: 50 },
+                { name: "Level 5 Member", messages: 150 },
+                { name: "Level 10 Member", messages: 300 },
+                { name: "Level 15 Member", messages: 500 },
+                { name: "Level 20 Member", messages: 750 },
+                { name: "Level 25 Member", messages: 1000 },
+                { name: "VIP Elite", messages: 1500 },
+                { name: "VIP Legendary", messages: 2000 },
+                { name: "VIP Mythic", messages: 3000 }
+            ];
+
+            let rewardListDescription = '';
+            for (const item of defaultRewardsLayout) {
+                const role = createdMemberRoles[item.name];
+                if (role) {
+                    config.roleRewards.push({ roleId: role.id, messagesNeeded: item.messages });
+                    rewardListDescription += `• عند الوصول إلى **${item.messages}** رسالة ⬅️ تُمنح تلقائياً رتبة **${role.name}**\n`;
+                }
+            }
+            await saveGuildConfig(guild.id, config);
+
+            // 5. إنشاء الغرفة المخصصة لإرشادات المستويات ونشر الإرشادات بها تلقائياً للوضوح والشفافية التامة
+            const guideCategory = guild.channels.cache.find(c => c.name === '🌍 | Start' && c.type === ChannelType.GuildCategory);
+            const guideChannel = await guild.channels.create({
+                name: '🔒・إرشادات • المستويات',
+                type: ChannelType.GuildText,
+                parent: guideCategory ? guideCategory.id : null
+            });
+
+            const guideEmbed = new EmbedBuilder()
+                .setTitle('📊 دليل ومكافآت نظام المستويات والتفاعل بالسيرفر')
+                .setDescription('مرحباً بكم جميعاً! تم إعداد وتفعيل نظام تفاعلي متطور يمنحكم نقاط خبرة ورتباً بشكل ذاتي عند تفاعلكم ومشاركتكم في السيرفر لضمان الشفافية والوضوح للجميع.')
+                .setColor(0xa855f7)
+                .addFields(
+                    { 
+                        name: '📈 كيف يعمل نظام المستويات؟', 
+                        value: 'كل رسالة ترسلها في رومات السيرفر تمنحك نقاط خبرة (XP) عشوائية وتزيد معدل رسائلك اليومي والتراكمي. يمكنك دائماً التحقق من بطاقتك الشخصية وصورتك عبر كتابة الأمر: `/rank`' 
+                    },
+                    { 
+                        name: '🎁 مكافآت الرتب التفاعلية التلقائية (Milestones):', 
+                        value: rewardListDescription || 'سيتم إدراج الرتب هنا تلقائياً بمجرد إتمام التثبيت.' 
+                    },
+                    { 
+                        name: '🏆 الترقية الفورية والجوائز:', 
+                        value: 'يقوم البوت تلقائياً بتحديث رتبتك ومنحك الرتب التفاعلية بمجرد بلوغك لعدد الرسائل الموضح أعلاه فوراً مع منشن وإشعار مصور رائع يظهر لجميع الأعضاء.' 
                     }
-                }
-                await interaction.followUp({ content: '✅ تم مسح كافة الرتب غير المحمية بنجاح!', ephemeral: true });
-            } catch (e) {
-                console.error(e);
-                await interaction.followUp({ content: `❌ حدث خطأ أثناء مسح الرتب: ${e.message}`, ephemeral: true });
-            }
-        }
+                )
+                .setFooter({ text: 'نتمنى لكم قضاء وقت ممتع وتفاعل استثنائي في BRQ Community' })
+                .setTimestamp();
 
-        // أوامر التذاكر اليدوية
-        if (commandName === 'add') {
-            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
-                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
-            }
-            const targetMember = options.getMember('member');
-            try {
-                await channel.permissionOverwrites.edit(targetMember.id, {
-                    ViewChannel: true,
-                    SendMessages: true,
-                    ReadMessageHistory: true
-                });
-                await interaction.reply({ content: `✅ تم إضافة ${targetMember} إلى التذكرة الحالية بنجاح.` });
-            } catch (e) {
-                await interaction.reply({ content: `❌ حدث خطأ أثناء الإضافة: ${e.message}`, ephemeral: true });
-            }
-        }
+            await guideChannel.send({ embeds: [guideEmbed] });
 
-        if (commandName === 'remove') {
-            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
-                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
-            }
-            const targetMember = options.getMember('member');
-            try {
-                await channel.permissionOverwrites.delete(targetMember.id);
-                await interaction.reply({ content: `✅ تم إزالة ${targetMember} من التذكرة بنجاح.` });
-            } catch (e) {
-                await interaction.reply({ content: `❌ حدث خطأ أثناء الإزالة: ${e.message}`, ephemeral: true });
-            }
-        }
+            await interaction.followUp({ content: '✅ تم الانتهاء من إعداد الرومات وتوزيع الصلاحيات وإنشاء 100 رتبة ونشر دليل المستويات بنجاح!', ephemeral: true });
 
-        if (commandName === 'claim') {
-            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
-                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
-            }
-            if (!isStaffOrAdmin(member)) {
-                return interaction.reply({ content: '❌ هذا الأمر مخصص فقط لطاقم العمل والإدارة.', ephemeral: true });
-            }
-            const staffRole = guild.roles.cache.find(r => r.name === 'Staff');
-            try {
-                if (staffRole) {
-                    await channel.permissionOverwrites.edit(staffRole.id, { ViewChannel: false });
-                }
-                await channel.permissionOverwrites.edit(interaction.user.id, {
-                    ViewChannel: true,
-                    SendMessages: true,
-                    ReadMessageHistory: true
-                });
-                await interaction.reply({ content: `💼 تم استلام التذكرة الحالية بواسطة ${interaction.user}.` });
-            } catch (e) {
-                await interaction.reply({ content: `❌ فشل استلام التذكرة: ${e.message}`, ephemeral: true });
-            }
-        }
-
-        if (commandName === 'unclaim') {
-            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
-                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
-            }
-            if (!isStaffOrAdmin(member)) {
-                return interaction.reply({ content: '❌ هذا الأمر مخصص فقط لطاقم العمل والإدارة.', ephemeral: true });
-            }
-            const staffRole = guild.roles.cache.find(r => r.name === 'Staff');
-            try {
-                if (staffRole) {
-                    await channel.permissionOverwrites.edit(staffRole.id, { ViewChannel: true });
-                }
-                await interaction.reply({ content: `🔓 تم إلغاء الاستلام، وأصبحت التذكرة متاحة مجدداً لكافة المشرفين.` });
-            } catch (e) {
-                await interaction.reply({ content: `❌ فشل إلغاء الاستلام: ${e.message}`, ephemeral: true });
-            }
-        }
-
-        if (commandName === 'rename') {
-            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
-                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
-            }
-            if (!isStaffOrAdmin(member)) {
-                return interaction.reply({ content: '❌ هذا الأمر مخصص فقط لطاقم العمل والإدارة.', ephemeral: true });
-            }
-            const newName = options.getString('name');
-            try {
-                await channel.setName(newName);
-                await interaction.reply({ content: `✅ تم إعادة تسمية التذكرة بنجاح إلى: **${newName}**` });
-            } catch (e) {
-                await interaction.reply({ content: `❌ فشل إعادة التسمية: ${e.message}`, ephemeral: true });
-            }
-        }
-
-        if (commandName === 'close') {
-            if (!channel.name.startsWith('🎫-') && !channel.name.startsWith('ticket-')) {
-                return interaction.reply({ content: '❌ يمكنك استخدام هذا الأمر داخل رومات التذاكر فقط!', ephemeral: true });
-            }
-            if (!isStaffOrAdmin(member)) {
-                return interaction.reply({ content: '❌ لا يمكنك إغلاق التذكرة، الإغلاق مخصص للإدارة وطاقم العمل فقط.', ephemeral: true });
-            }
-            await interaction.reply({ content: 'سيتم إغلاق وحذف التذكرة خلال 5 ثوانٍ...', ephemeral: false });
-            setTimeout(async () => {
-                try {
-                    await channel.delete();
-                } catch (e) {
-                    console.error('Failed to delete channel:', e);
-                }
-            }, 5000);
-        }
-
-        // تهيئة السيرفر بالكامل مع 100 رتبة وتوزيع الصلاحيات الصارمة
-        if (commandName === 'setup_server') {
-            if (!isAdministrator) {
-                return interaction.reply({ content: '❌ هذا الأمر مخصص لمن يمتلكون صلاحية الإدارة (Administrator) فقط!', ephemeral: true });
-            }
-            await interaction.reply({ content: '⏳ جاري بدء تهيئة السيرفر بالكامل وتنسيق الرومات وإنشاء 100 رتبة متنوعة، يرجى الانتظار...', ephemeral: true });
-
-            try {
-                // 1. إنشاء رتب الإدارة الخمسين (50 Management Roles)
-                const createdManagementRoles = {};
-                for (const roleName of MANAGEMENT_ROLES) {
-                    const role = await guild.roles.create({ name: roleName, color: 0x3498DB });
-                    createdManagementRoles[roleName] = role;
-                    await sleep(150);
-                }
-
-                // 2. إنشاء رتب الأعضاء الخمسين (50 Member Roles)
-                for (const roleName of MEMBER_ROLES) {
-                    // how
-                    // 
-                    // for items
-                    await guild.roles.create({ name: roleName, color: 0x2ECC71 });
-                    await sleep(150);
-                }
-
-                const ownerRole = createdManagementRoles["Owner"];
-                const highAdminRole = createdManagementRoles["High Admin"];
-                const adminRole = createdManagementRoles["Admin"];
-                const staffRole = createdManagementRoles["Staff"];
-                const middlemanRole = createdManagementRoles["Middleman (الوسيط)"];
-                const mmManagerRole = createdManagementRoles["Middleman Manager"];
-
-                // 3. البدء في إنشاء الرومات مع تطبيق الصلاحيات بشكل صارم ومنع التداخل
-                for (const group of STRUCTURE) {
-                    let category = null;
-                    let overwrites = [];
-
-                    if (group.category === "👑 | Owner") {
-                        overwrites = [
-                            { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
-                        ];
-                        if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                    } else if (group.category === "🛠️ | Staff" || group.category === "🛠️ | Logo") {
-                        overwrites = [
-                            { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
-                        ];
-                        if (staffRole) overwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                        if (adminRole) overwrites.push({ id: adminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                        if (highAdminRole) overwrites.push({ id: highAdminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                        if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                    } else if (group.category === "⚖️ | BRQ - Meditators") {
-                        overwrites = [
-                            { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
-                        ];
-                        if (middlemanRole) overwrites.push({ id: middlemanRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                        if (mmManagerRole) overwrites.push({ id: mmManagerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                        if (staffRole) overwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                        if (adminRole) overwrites.push({ id: adminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                        if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                    }
-
-                    if (group.category) {
-                        category = await guild.channels.create({
-                            name: group.category,
-                            type: ChannelType.GuildCategory,
-                            permissionOverwrites: overwrites
-                        });
-                        await sleep(500);
-                    }
-
-                    for (const ch of group.channels) {
-                        await guild.channels.create({
-                            name: ch.name,
-                            type: ch.type === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText,
-                            parent: category ? category.id : null,
-                            userLimit: ch.userLimit || undefined,
-                            permissionOverwrites: category ? category.permissionOverwrites.cache.map(o => o) : []
-                        });
-                        await sleep(500);
-                    }
-                }
-
-                await interaction.followUp({ content: '✅ تم الانتهاء من إعداد الرومات وتوزيع الصلاحيات وإنشاء 100 رتبة بدقة تامة!', ephemeral: true });
-
-            } catch (e) {
-                console.error(e);
-                await interaction.followUp({ content: `❌ حدث خطأ أثناء إعداد الرومات: ${e.message}`, ephemeral: true });
-            }
-        }
-
-        if (commandName === 'setup_ticket') {
-            if (!isAdministrator) {
-                return interaction.reply({ content: '❌ هذا الأمر مخصص لمن يمتلكون صلاحية الإدارة (Administrator) فقط!', ephemeral: true });
-            }
-
-            const embed = new EmbedBuilder()
-                .setTitle('تذكرة الدعم الفني | Tickets Panel 🎫')
-                .setDescription('إذا كنت تواجه مشكلة، أو ترغب بتقديم شكوى أو استفسار، يرجى فتح تذكرة عبر الضغط على الزر أدناه وسيقوم فريق العمل بتقديم المساعدة.')
-                .setColor(0x0099FF)
-                .setFooter({ text: 'نظام تذاكر سيرفر BRQ Community' });
-
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId('create_ticket_btn')
-                    .setLabel('إنشاء تذكرة 🎫')
-                    .setStyle(ButtonStyle.Success)
-            );
-
-            try {
-                await interaction.channel.send({ embeds: [embed], components: [row] });
-                await interaction.reply({ content: '✅ تم إرسال لوحة التحكم بالتذاكر بنجاح!', ephemeral: true });
-            } catch (e) {
-                await interaction.reply({ content: `❌ حدث خطأ أثناء إرسال اللوحة: ${e.message}`, ephemeral: true });
-            }
+        } catch (e) {
+            console.error(e);
+            await interaction.followUp({ content: `❌ حدث خطأ أثناء إعداد الرومات: ${e.message}`, ephemeral: true });
         }
     }
 });
