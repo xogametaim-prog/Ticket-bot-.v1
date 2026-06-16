@@ -22,7 +22,8 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildVoiceStates
     ]
 });
 
@@ -51,30 +52,53 @@ if (MONGO_URI) {
     }
 }
 
-// هيكل قاعدة بيانات الأعضاء لـ MongoDB
+// هيكل قاعدة بيانات الأعضاء والاقتصاد لـ MongoDB
 const userSchema = new mongoose.Schema({
     guildId: String,
     userId: String,
     level: { type: Number, default: 1 },
     xp: { type: Number, default: 0 },
-    messageCount: { type: Number, default: 0 }
+    messageCount: { type: Number, default: 0 },
+    coins: { type: Number, default: 0 },
+    lastDaily: { type: Date, default: null }
 });
 const UserLevelModel = mongoose.model('UserLevel', userSchema);
 
-// هيكل إعدادات السيرفر لـ MongoDB
+// هيكل إعدادات السيرفر المتطور لـ MongoDB
 const configSchema = new mongoose.Schema({
     guildId: String,
     levelChannelId: String,
+    islamicChannelId: String,
     roleRewards: [{ roleId: String, messagesNeeded: Number }]
 });
 const GuildConfigModel = mongoose.model('GuildConfig', configSchema);
+
+// مصفوفة الرامات الصوتية المؤقتة لتتبعها وحذفها عند خروج الجميع
+const tempVoiceChannels = new Map();
+
+// مصفوفة المشاركين في مسابقات الـ Giveaways الحالية
+const activeGiveaways = new Map();
+
+// مكتبة الأذكار والآيات القرآنية لنظام النشر التلقائي
+const ISLAMIC_REMINDERS = [
+    "📖 قَالَ اللَّهُ تَعَالَى: {وَمَنْ يَتَّقِ اللَّهَ يَجْعَلْ لَهُ مَخْرَجًا * وَيَرْزُقْهُ مِنْ حَيْثُ لَا يَحْتَسِبُ}",
+    "🕌 قَالَ رَسُولُ اللَّهِ ﷺ: 'مَنْ سَلَكَ طَرِيقًا يَلْتَمِسُ فِيهِ عِلْمًا سَهَّلَ اللَّهُ لَهُ بِهِ طَرِيقًا إِلَى الْجَنَّةِ'",
+    "📖 قَالَ اللَّهُ تَعَالَى: {أَلَا بِذِكْرِ اللَّهِ تَطْمَئِنُّ الْقُلُوبُ}",
+    "🕌 سُبْحَانَ اللَّهِ وَبِحَمْدِهِ ، سُبْحَانَ اللَّهِ الْعَظِيمِ",
+    "🕌 لَا حَوْلَ وَلَا قُوَّةَ إِلَّا بِاللَّهِ العَلِيِّ العَظِيمِ (كنز من كنوز الجنة)",
+    "📖 قَالَ اللَّهُ تَعَالَى: {إِنَّ اللَّهَ وَمَلَائِكَتَهُ يُصَلُّونَ عَلَى النَّبِيِّ ۚ يَا أَيُّهَا الَّذِينَ آمَنُوا صَلُّوا عَلَيْهِ وَسَلِّمُوا تَسْلِيمًا}",
+    "🕌 قَالَ رَسُولُ اللَّهِ ﷺ: 'كَلِمَتَانِ خَفِيفَتَانِ عَلَى اللِّسَانِ، ثَقِيلَتَانِ فِي الْمِيزَانِ، حَبِيبَتَانِ إِلَى الرَّحْمَنِ: سُبْحَانَ اللَّهِ وَبِحَمْدِهِ، سُبْحَانَ اللَّهِ الْعَظِيمِ'",
+    "🕌 اللَّهُمَّ إِنَّكَ عَفُوٌّ تُحِبُّ الْعَفْوَ فَاعْفُ عَنَّا",
+    "📖 قَالَ اللَّهُ تَعَالَى: {رَبَّنَا آتِنَا فِي الدُّنْيَا حَسَنَةً وَفِي الْآخِرَةِ حَسَنَةً وَقِنَا عَذَابَ النَّارِ}",
+    "🕌 لَا إِلَهَ إِلَّا أَنْتَ سُبْحَانَكَ إِنِّي كُنْتُ مِنَ الظَّالِمِينَ"
+];
 
 // جلب بيانات العضو
 async function getUserData(guildId, userId) {
     if (useMongoDB) {
         let data = await UserLevelModel.findOne({ guildId, userId });
         if (!data) {
-            data = new UserLevelModel({ guildId, userId, level: 1, xp: 0, messageCount: 0 });
+            data = new UserLevelModel({ guildId, userId, level: 1, xp: 0, messageCount: 0, coins: 0, lastDaily: null });
             await data.save();
         }
         return data;
@@ -82,7 +106,7 @@ async function getUserData(guildId, userId) {
         if (!localDatabase[guildId]) localDatabase[guildId] = {};
         if (!localDatabase[guildId].users) localDatabase[guildId].users = {};
         if (!localDatabase[guildId].users[userId]) {
-            localDatabase[guildId].users[userId] = { level: 1, xp: 0, messageCount: 0 };
+            localDatabase[guildId].users[userId] = { level: 1, xp: 0, messageCount: 0, coins: 0, lastDaily: null };
         }
         return localDatabase[guildId].users[userId];
     }
@@ -94,13 +118,17 @@ async function saveUserData(guildId, userId, data) {
         await UserLevelModel.updateOne({ guildId, userId }, {
             level: data.level,
             xp: data.xp,
-            messageCount: data.messageCount
+            messageCount: data.messageCount,
+            coins: data.coins,
+            lastDaily: data.lastDaily
         });
     } else {
         localDatabase[guildId].users[userId] = {
             level: data.level,
             xp: data.xp,
-            messageCount: data.messageCount
+            messageCount: data.messageCount,
+            coins: data.coins,
+            lastDaily: data.lastDaily
         };
         fs.writeFileSync('./database.json', JSON.stringify(localDatabase, null, 2));
     }
@@ -111,24 +139,25 @@ async function getGuildConfig(guildId) {
     if (useMongoDB) {
         let config = await GuildConfigModel.findOne({ guildId });
         if (!config) {
-            config = new GuildConfigModel({ guildId, levelChannelId: null, roleRewards: [] });
+            config = new GuildConfigModel({ guildId, levelChannelId: null, islamicChannelId: null, roleRewards: [] });
             await config.save();
         }
         return config;
     } else {
         if (!localDatabase[guildId]) localDatabase[guildId] = {};
         if (!localDatabase[guildId].config) {
-            localDatabase[guildId].config = { levelChannelId: null, roleRewards: [] };
+            localDatabase[guildId].config = { levelChannelId: null, islamicChannelId: null, roleRewards: [] };
         }
         return localDatabase[guildId].config;
     }
 }
 
-// حفظ إعدادات السيرفر
+// حفظ الإعدادات
 async function saveGuildConfig(guildId, configData) {
     if (useMongoDB) {
         await GuildConfigModel.updateOne({ guildId }, {
             levelChannelId: configData.levelChannelId,
+            islamicChannelId: configData.islamicChannelId,
             roleRewards: configData.roleRewards
         });
     } else {
@@ -137,7 +166,7 @@ async function saveGuildConfig(guildId, configData) {
     }
 }
 
-// التحقق مما إذا كان المستخدم يمتلك صلاحية الإدارة (Administrator) تلقائياً
+// التحقق مما إذا كان المستخدم من طاقم الإدارة (Staff فما فوق)
 function isStaffOrAdmin(member) {
     if (member.permissions.has(PermissionFlagsBits.Administrator)) return true;
     const managementRoles = ["Staff", "Admin", "High Admin", "Owner", "Co-Owner", "Founder", "Staff Supervisor", "Supervisor"];
@@ -331,7 +360,176 @@ const MEMBER_ROLES = [
     "Level 27 Member", "Level 28 Member", "Level 29 Member"
 ];
 
-// معالجة الرسائل: نظام الردود التلقائية والخبرة ومكافآت الرتب
+// مزامنة الأوامر على ديسكورد
+client.once('ready', async () => {
+    console.log(`تم تسجيل الدخول بنجاح كـ: ${client.user.tag}`);
+    
+    const commands = [
+        {
+            name: 'ban',
+            description: 'حظر عضو من السيرفر',
+            options: [
+                { name: 'member', type: 6, description: 'العضو المراد حظره', required: true },
+                { name: 'reason', type: 3, description: 'السبب', required: false }
+            ]
+        },
+        {
+            name: 'timeout',
+            description: 'إعطاء تايم أوت (كتم مؤقت) لعضو في السيرفر',
+            options: [
+                { name: 'member', type: 6, description: 'العضو المراد كتمه', required: true },
+                { name: 'minutes', type: 4, description: 'المدة بالدقائق', required: true },
+                { name: 'reason', type: 3, description: 'السبب', required: false }
+            ]
+        },
+        {
+            name: 'setup_server',
+            description: 'إنشاء رومات وقنوات السيرفر وتطبيق الصلاحيات وإنشاء 100 رتبة متنوعة'
+        },
+        {
+            name: 'setup_ticket',
+            description: 'إرسال لوحة التحكم بنظام التذاكر'
+        },
+        {
+            name: 'setup_middleman_panel',
+            description: 'إرسال لوحة التحكم بطلب وسطاء معتمدين (للإداريين فقط)'
+        },
+        {
+            name: 'delete_all_channels',
+            description: 'حذف جميع رومات وقنوات السيرفر بالكامل (للإداريين فقط)'
+        },
+        {
+            name: 'delete_channel',
+            description: 'حذف روم معين يدوياً (للإداريين فقط)',
+            options: [
+                { name: 'channel', type: 7, description: 'الروم المراد حذفه', required: true }
+            ]
+        },
+        {
+            name: 'delete_all_roles',
+            description: 'حذف جميع الرتب الموجودة في السيرفر باستثناء رتبة البوت (للإداريين فقط)'
+        },
+        {
+            name: 'publish_rules',
+            description: 'نشر قوانين وإرشادات السيرفر في الروم المخصص (للإداريين فقط)'
+        },
+        {
+            name: 'rank',
+            description: 'عرض بطاقة المستوى وعدد رسائل العضو الحالية بشكل مصور',
+            options: [
+                { name: 'user', type: 6, description: 'العضو المراد عرض مستواه (اختياري)', required: false }
+            ]
+        },
+        {
+            name: 'set_level_channel',
+            description: 'تحديد الغرفة المخصصة لإشعارات وصور زيادة المستويات (للإداريين فقط)',
+            options: [
+                { name: 'channel', type: 7, description: 'الغرفة المخصصة للإشعارات', required: true }
+            ]
+        },
+        {
+            name: 'set_islamic_channel',
+            description: 'تحديد الغرفة المخصصة لنشر الآيات والأذكار التلقائية (للإداريين فقط)',
+            options: [
+                { name: 'channel', type: 7, description: 'الغرفة الإسلامية المخصصة', required: true }
+            ]
+        },
+        {
+            name: 'add_role_reward',
+            description: 'ربط رتبة بعدد رسائل محدد للحصول عليها تلقائياً (للإداريين فقط)',
+            options: [
+                { name: 'role', type: 8, description: 'الرتبة المراد منحها كهدية', required: true },
+                { name: 'messages_needed', type: 4, description: 'عدد الرسائل المطلوبة للحصول على الرتبة', required: true }
+            ]
+        },
+        {
+            name: 'daily',
+            description: 'الحصول على المكافأة المالية اليومية للبنك 🪙'
+        },
+        {
+            name: 'coins',
+            description: 'عرض رصيدك الحالي من عملات BRQ Coins في البنك',
+            options: [
+                { name: 'user', type: 6, description: 'العضو المراد عرض رصيده (اختياري)', required: false }
+            ]
+        },
+        {
+            name: 'transfer',
+            description: 'تحويل عملات BRQ Coins من حسابك لعضو آخر في السيرفر',
+            options: [
+                { name: 'user', type: 6, description: 'العضو المراد تحويل العملات إليه', required: true },
+                { name: 'amount', type: 4, description: 'المبلغ المراد تحويله', required: true }
+            ]
+        },
+        {
+            name: 'shop',
+            description: 'عرض متجر رتب السيرفر الافتراضية المتاحة للشراء'
+        },
+        {
+            name: 'buy',
+            description: 'شراء رتبة من متجر السيرفر عبر خصم العملات من حسابك',
+            options: [
+                { name: 'role', type: 8, description: 'الرتبة المراد شراؤها من المتجر', required: true }
+            ]
+        },
+        {
+            name: 'giveaway_start',
+            description: 'بدء مسابقة جيف اواي تفاعلية بنظام الشروط في السيرفر (للإداريين فقط)',
+            options: [
+                { name: 'prize', type: 3, description: 'الجائزة المقدمة', required: true },
+                { name: 'duration_minutes', type: 4, description: 'مدة المسابقة بالدقائق', required: true },
+                { name: 'winners_count', type: 4, description: 'عدد الفائزين', required: true },
+                { name: 'level_requirement', type: 4, description: 'مستوى التفاعل المطلوب كحد أدنى للمشاركة (0 للمفتوح)', required: true }
+            ]
+        },
+        {
+            name: 'help',
+            description: 'دليل وأوامر البوت للتحكم في كافة الأنظمة والخيارات'
+        },
+        {
+            name: 'add',
+            description: 'إضافة عضو معين إلى التذكرة الحالية',
+            options: [
+                { name: 'member', type: 6, description: 'العضو المراد إضافته', required: true }
+            ]
+        },
+        {
+            name: 'remove',
+            description: 'إزالة عضو معين من التذكرة الحالية',
+            options: [
+                { name: 'member', type: 6, description: 'العضو المراد إزالته', required: true }
+            ]
+        },
+        {
+            name: 'claim',
+            description: 'استلام التذكرة الحالية وتخصيصها لك فقط كعضو إدارة'
+        },
+        {
+            name: 'unclaim',
+            description: 'إلغاء استلام التذكرة وإتاحتها مجدداً لكافة أعضاء الإدارة'
+        },
+        {
+            name: 'rename',
+            description: 'إعادة تسمية التذكرة الحالية',
+            options: [
+                { name: 'name', type: 3, description: 'الاسم الجديد للتذكرة', required: true }
+            ]
+        },
+        {
+            name: 'close',
+            description: 'إغلاق وحذف التذكرة الحالية'
+        }
+    ];
+
+    try {
+        await client.application.commands.set(commands);
+        console.log('تمت مزامنة جميع أوامر السلاش بنجاح.');
+    } catch (error) {
+        console.error('فشلت عملية تسجيل الأوامر:', error);
+    }
+});
+
+// نظام الردود التلقائية والخبرة ومعدل الرسائل والعملات
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
@@ -339,7 +537,7 @@ client.on('messageCreate', async (message) => {
     const guildId = message.guild.id;
     const userId = message.author.id;
 
-    // 1. نظام الردود التلقائية
+    // 1. نظام الردود التلقائية المباشر
     if (trimmedMsg === "سلام عليكم") {
         return message.reply("و عليكم السلام ورحمه الله وبركاته").catch(() => {});
     } else if (trimmedMsg === "باك") {
@@ -354,12 +552,17 @@ client.on('messageCreate', async (message) => {
         const userData = await getUserData(guildId, userId);
         userData.messageCount += 1;
         
+        // إعطاء عملات عشوائية (بين 10 و 30 عملة) لكل رسالة تفاعلية
+        const coinsToAdd = Math.floor(Math.random() * 21) + 10;
+        userData.coins += coinsToAdd;
+
+        // إضافة نقاط خبرة عشوائية (بين 10 و 20 XP)
         const xpToAdd = Math.floor(Math.random() * 11) + 10;
         userData.xp += xpToAdd;
 
         const xpNeeded = userData.level * 150;
         
-        // إذا زاد مستوى العضو (Level Up)
+        // حدوث زيادة المستوى (Level Up)
         if (userData.xp >= xpNeeded) {
             const oldLevel = userData.level;
             userData.xp -= xpNeeded;
@@ -373,7 +576,7 @@ client.on('messageCreate', async (message) => {
                 if (targetChannel) announceChannel = targetChannel;
             }
 
-            // رسم بطاقة الترقية بالخلفية المرفقة (1280x543)
+            // رسم وتوليد صورة الترقية بالخلفية المرفقة (1280x543)
             try {
                 const canvas = createCanvas(1280, 543);
                 const ctx = canvas.getContext('2d');
@@ -408,7 +611,6 @@ client.on('messageCreate', async (message) => {
 
                 ctx.shadowBlur = 0;
 
-                // البيانات على الصورة بدقة ووضوح تام
                 ctx.fillStyle = '#FFFFFF';
                 ctx.font = 'bold 44px sans-serif';
                 ctx.fillText('ترقية تفاعلية جديدة! 🎉', 360, 160);
@@ -422,7 +624,6 @@ client.on('messageCreate', async (message) => {
                 ctx.fillText(`اسم العضو: ${message.author.username}`, 360, 310);
                 ctx.fillText(`إجمالي الرسائل: ${userData.messageCount}`, 360, 370);
 
-                // كتابة الآي دي في الأعلى بشكل منسق
                 ctx.fillStyle = '#a855f7';
                 ctx.font = 'bold 22px sans-serif';
                 ctx.fillText(`ID: ${userId}`, 980, 60);
@@ -431,7 +632,7 @@ client.on('messageCreate', async (message) => {
                 const attachment = new AttachmentBuilder(buffer, { name: `levelup-${userId}.png` });
 
                 await announceChannel.send({ 
-                    content: `🎉 **تهانينا للتفاعل المميز!**\nلقد كنت في مستوى **${oldLevel}** وأصبحت الآن في مستوى **${newLevel}**!\nالرتبة التفاعلية السابقة: **Level ${oldLevel}** ➡️ الرتبة الجديدة: **Level ${newLevel}**`,
+                    content: `🎉 **ترقية تفاعلية للأعضاء!**\nلقد كنت في مستوى **${oldLevel}** وأصبحت الآن في مستوى **${newLevel}**!\nالرتبة التفاعلية السابقة: **Level ${oldLevel}** ➡️ الرتبة الجديدة: **Level ${newLevel}**`,
                     files: [attachment] 
                 }).catch(() => {});
 
@@ -441,7 +642,7 @@ client.on('messageCreate', async (message) => {
             }
         }
 
-        // 2. التحقق من مكافآت الرتب التلقائية بمعدل الرسائل
+        // التحقق من الرتب الممنوحة كجائزة على الرسائل
         const config = await getGuildConfig(guildId);
         if (config && config.roleRewards && config.roleRewards.length > 0) {
             for (const reward of config.roleRewards) {
@@ -465,16 +666,175 @@ client.on('messageCreate', async (message) => {
     }
 });
 
+// 1. نظام الرومات الصوتية المؤقتة الذكي (Temp Voice Rooms)
+client.on('voiceStateUpdate', async (oldState, newState) => {
+    const member = newState.member;
+    const guild = newState.guild;
+
+    // حالة الانضمام لروم "انشاء • فويس 🔊"
+    if (newState.channelId) {
+        const joinChannel = guild.channels.cache.get(newState.channelId);
+        if (joinChannel && (joinChannel.name.includes('انشاء • فويس') || joinChannel.name.includes('انشاء-فويس'))) {
+            try {
+                // إنشاء روم صوتي مؤقت مخصص للعضو باسمه في نفس الكاتيجوري
+                const tempChannel = await guild.channels.create({
+                    name: `🎙️ | فويس ${member.displayName}`,
+                    type: ChannelType.GuildVoice,
+                    parent: joinChannel.parentId,
+                    userLimit: 10,
+                    permissionOverwrites: [
+                        {
+                            id: member.id,
+                            allow: [PermissionFlagsBits.MuteMembers, PermissionFlagsBits.DeafenMembers, PermissionFlagsBits.MoveMembers]
+                        }
+                    ]
+                });
+
+                // نقل العضو إلى الفويس الجديد
+                await member.voice.setChannel(tempChannel);
+                tempVoiceChannels.set(tempChannel.id, member.id);
+            } catch (e) {
+                console.error('Failed to create dynamic temp voice room:', e);
+            }
+        }
+    }
+
+    // حالة الخروج من روم مؤقت وحذفه فور خلوه من الأعضاء
+    if (oldState.channelId) {
+        const leaveChannel = guild.channels.cache.get(oldState.channelId);
+        if (leaveChannel && tempVoiceChannels.has(leaveChannel.id)) {
+            if (leaveChannel.members.size === 0) {
+                try {
+                    await leaveChannel.delete();
+                    tempVoiceChannels.delete(leaveChannel.id);
+                } catch (e) {
+                    console.error('Failed to delete empty temp voice room:', e);
+                }
+            }
+        }
+    }
+});
+
+// 2. نظام النشر التلقائي للآيات والأذكار (كل ساعة)
+setInterval(async () => {
+    try {
+        const guilds = client.guilds.cache;
+        for (const guild of guilds.values()) {
+            const config = await getGuildConfig(guild.id);
+            if (config && config.islamicChannelId) {
+                const targetChannel = guild.channels.cache.get(config.islamicChannelId);
+                if (targetChannel) {
+                    const randomReminder = ISLAMIC_REMINDERS[Math.floor(Math.random() * ISLAMIC_REMINDERS.length)];
+                    
+                    const embed = new EmbedBuilder()
+                        .setTitle('🕌 تذكير إسلامي دوري أجر لي ولك 🕌')
+                        .setDescription(`**${randomReminder}**`)
+                        .setColor(0x10b981)
+                        .setFooter({ text: 'سبحان الله وبحمده ، سبحان الله العظيم' })
+                        .setTimestamp();
+
+                    await targetChannel.send({ embeds: [embed] }).catch(() => {});
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Error in Islamic auto-poster interval:', e);
+    }
+}, 3600000); // 3,600,000 مللي ثانية = 1 ساعة دقيقة تماماً
+
+// معالجة كافة التفاعلات والأوامر
 client.on('interactionCreate', async (interaction) => {
     
-    // 1. التفاعل مع الأزرار الثلاثية للتذكرة
+    // أزرار التذاكر والوسطاء وجيف اوايز
     if (interaction.isButton()) {
         const { guild, member, customId, channel } = interaction;
 
+        // استخراج معرف صاحب التذكرة من الوصف
         const topic = channel.topic || '';
         const match = topic.match(/creator-id:\s*(\d+)/);
         const creatorId = match ? match[1] : null;
 
+        // 3. بوابة نظام الوسطاء المتفاعل (Middleman Buttons)
+        if (customId === 'request_middleman_btn') {
+            const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+
+            const modal = new ModalBuilder()
+                .setCustomId('request_middleman_modal')
+                .setTitle('طلب وسيط معتمد للصفقة ⚖️');
+
+            const sellerInput = new TextInputBuilder()
+                .setCustomId('seller_id')
+                .setLabel('آي دي (ID) البائع بالكامل')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('مثال: 123456789012345678')
+                .setRequired(true);
+
+            const dealInput = new TextInputBuilder()
+                .setCustomId('deal_details')
+                .setLabel('تفاصيل السلعة / الصفقة')
+                .setStyle(TextInputStyle.Paragraph)
+                .setPlaceholder('مثال: بيع حساب تيك توك مقابل كاش وبطاقات الدفع...')
+                .setRequired(true);
+
+            const priceInput = new TextInputBuilder()
+                .setCustomId('deal_price')
+                .setLabel('المبلغ وطريقة الدفع المتفق عليها')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('مثال: 50 دولار عبر الـ PayPal')
+                .setRequired(true);
+
+            const row1 = new ActionRowBuilder().addComponents(sellerInput);
+            const row2 = new ActionRowBuilder().addComponents(dealInput);
+            const row3 = new ActionRowBuilder().addComponents(priceInput);
+            modal.addComponents(row1, row2, row3);
+
+            return interaction.showModal(modal);
+        }
+
+        // أزرار التحكم بالوساطة للوسطاء المعتمدين
+        if (customId === 'claim_deal_btn') {
+            if (!isStaffOrAdmin(member)) {
+                return interaction.reply({ content: '❌ هذا الإجراء مخصص للوسطاء المعتمدين والإدارة فقط.', ephemeral: true });
+            }
+            await interaction.reply({ content: `💼 تم استلام عملية الوساطة الحالية ومتابعتها بواسطة الوسيط: ${member}` });
+        }
+
+        if (customId === 'complete_deal_btn') {
+            if (!isStaffOrAdmin(member)) {
+                return interaction.reply({ content: '❌ هذا الإجراء مخصص للوسطاء المعتمدين والإدارة فقط.', ephemeral: true });
+            }
+            await interaction.reply({ content: `✅ تم إتمام وتسليم الصفقة بنجاح تحت إشراف الوسيط: ${member}!\nسيتم أرشفة وإغلاق الروم خلال 10 ثوانٍ...` });
+            setTimeout(() => channel.delete().catch(() => {}), 10000);
+        }
+
+        if (customId === 'cancel_deal_btn') {
+            if (!isStaffOrAdmin(member)) {
+                return interaction.reply({ content: '❌ هذا الإجراء مخصص للوسطاء المعتمدين والإدارة فقط.', ephemeral: true });
+            }
+            await interaction.reply({ content: `❌ تم إلغاء الصفقة والوساطة بواسطة الوسيط: ${member}.\nسيتم أرشفة وإغلاق الروم خلال 10 ثوانٍ...` });
+            setTimeout(() => channel.delete().catch(() => {}), 10000);
+        }
+
+        // نظام الاشتراك في الجيف اواي (Giveaway Join)
+        if (customId === 'join_giveaway_btn') {
+            const gw = activeGiveaways.get(interaction.message.id);
+            if (!gw) return interaction.reply({ content: '❌ انتهت هذه المسابقة أو لم تعد صالحة.', ephemeral: true });
+
+            if (gw.participants.includes(member.id)) {
+                return interaction.reply({ content: '❌ أنت مشارك بالفعل في هذا الجيف اواي مسبقاً!', ephemeral: true });
+            }
+
+            // فحص شرط المستوى المطلوب للدخول في التوزيع للعدل والتفاعل
+            const userData = await getUserData(guild.id, member.id);
+            if (userData.level < gw.levelRequirement) {
+                return interaction.reply({ content: `❌ لا يمكنك المشاركة في هذا الجيف اواي. المستوى المطلوب للمشاركة هو **${gw.levelRequirement}** على الأقل (مستواك الحالي: **${userData.level}**). تفاعل أكثر للدخول!`, ephemeral: true });
+            }
+
+            gw.participants.push(member.id);
+            await interaction.reply({ content: '✅ تم تسجيل مشاركتك بنجاح في الجيف اواي، نتمنى لك التوفيق! 🎁', ephemeral: true });
+        }
+
+        // أزرار تذكرة الدعم الفني الافتراضية
         if (customId === 'create_ticket_btn') {
             await interaction.deferReply({ ephemeral: true });
 
@@ -642,12 +1002,83 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // 2. التعامل مع النوافذ المنبثقة (Modals)
+    // النوافذ المنبثقة (Modals) للـ الوسطاء والقوانين
     if (interaction.isModalSubmit()) {
-        if (interaction.customId === 'publish_rules_modal') {
-            const title = interaction.fields.getTextInputValue('rules_title');
-            const content = interaction.fields.getTextInputValue('rules_content');
-            const guild = interaction.guild;
+        const { guild, member, customId, fields } = interaction;
+
+        // معالجة إرسال طلب الوساطة وإنشاء تذكرة وسيط تلقائياً مع الصلاحيات الصارمة
+        if (customId === 'request_middleman_modal') {
+            await interaction.deferReply({ ephemeral: true });
+
+            const sellerId = fields.getTextInputValue('seller_id').trim();
+            const dealDetails = fields.getTextInputValue('deal_details');
+            const dealPrice = fields.getTextInputValue('deal_price');
+
+            // فحص صحة الآي دي المدخل للبائع في ديسكورد
+            const sellerMember = await guild.members.fetch(sellerId).catch(() => null);
+
+            let category = guild.channels.cache.find(c => c.name === '⚖️ | BRQ - Meditators' && c.type === ChannelType.GuildCategory);
+            if (!category) {
+                category = await guild.channels.create({ name: '⚖️ | BRQ - Meditators', type: ChannelType.GuildCategory });
+            }
+
+            const staffRole = guild.roles.cache.find(r => r.name === 'Staff');
+            const mmRole = guild.roles.cache.find(r => r.name === 'Middleman (الوسيط)');
+
+            const overwrites = [
+                { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+                { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+                { id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+            ];
+
+            if (sellerMember) {
+                overwrites.push({ id: sellerMember.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+            }
+            if (staffRole) {
+                overwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+            }
+            if (mmRole) {
+                overwrites.push({ id: mmRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+            }
+
+            try {
+                const mmChannel = await guild.channels.create({
+                    name: `وساطة-${member.user.username}`,
+                    type: ChannelType.GuildText,
+                    parent: category.id,
+                    permissionOverwrites: overwrites
+                });
+
+                const dealEmbed = new EmbedBuilder()
+                    .setTitle('⚖️ صفقة تجارية معلقة - تذكرة وساطة رسمية ⚖️')
+                    .setDescription('مرحباً بكما في بوابة الصفقات الآمنة لـ BRQ Community.\nيرجى الانتظار لحين استلام الصفقة من قبل أحد الوسطاء المعتمدين.')
+                    .setColor(0x00AAAA)
+                    .addFields(
+                        { name: '👤 صاحب الطلب (المشتري):', value: `${member} (${member.id})`, inline: true },
+                        { name: '👤 الطرف الآخر (البائع):', value: sellerMember ? `${sellerMember} (${sellerId})` : `\`لم يُعثر على الآي دي المدخل: ${sellerId}\``, inline: true },
+                        { name: '📦 تفاصيل الصفقة:', value: `\`\`\`${dealDetails}\`\`\`` },
+                        { name: '💰 قيمة الصفقة وطريقة الدفع:', value: `\`${dealPrice}\`` }
+                    )
+                    .setFooter({ text: 'التحكم بالصفقة مخصص للوسطاء المعتمدين فقط.' });
+
+                const mmRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('claim_deal_btn').setLabel('استلام الصفقة 🔒').setStyle(ButtonStyle.Success),
+                    new ButtonBuilder().setCustomId('complete_deal_btn').setLabel('إتمام الصفقة ✅').setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId('cancel_deal_btn').setLabel('إلغاء الصفقة ❌').setStyle(ButtonStyle.Danger)
+                );
+
+                await mmChannel.send({ content: `<@&${mmRole ? mmRole.id : ''}> نداء تذكرة وساطة جديدة بحاجة لمتابعتكم.`, embeds: [dealEmbed], components: [mmRow] });
+                await interaction.followUp({ content: `✅ تم إنشاء تذكرة الوساطة بنجاح والتنسيق بين الأطراف: ${mmChannel}`, ephemeral: true });
+
+            } catch (e) {
+                console.error(e);
+                await interaction.followUp({ content: '❌ حدث خطأ غير متوقع أثناء فتح تذكرة الوساطة.', ephemeral: true });
+            }
+        }
+
+        if (customId === 'publish_rules_modal') {
+            const title = fields.getTextInputValue('rules_title');
+            const content = fields.getTextInputValue('rules_content');
 
             const rulesChannel = guild.channels.cache.find(c => 
                 c.name.includes('القوانين') || 
@@ -675,7 +1106,7 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // 3. التعامل مع أوامر السلاش (Slash Commands)
+    // 3. التعامل مع أوامر السلاش (Slash Commands) الكتابية
     if (interaction.isChatInputCommand()) {
         const { commandName, options, guild, member, channel } = interaction;
 
@@ -691,15 +1122,19 @@ client.on('interactionCreate', async (interaction) => {
                 .addFields(
                     { 
                         name: '🛡️ أوامر الإدارة العامة', 
-                        value: '`/setup_server` • لتهيئة السيرفر وإنشاء الرومات والرتب.\n`/setup_ticket` • لإرسال بانل التذاكر التفاعلي.\n`/delete_all_channels` • لمسح كافة الرومات بالسيرفر يدوياً.\n`/delete_channel` • لحذف روم محدد.\n`/delete_all_roles` • لمسح جميع الرتب التلقائية بالسيرفر.\n`/publish_rules` • لنشر قوانين السيرفر كبطاقة إمبد.' 
+                        value: '`/setup_server` • لتهيئة السيرفر وإنشاء الرومات والرتب والجوائز.\n`/setup_ticket` • لإرسال بانل التذاكر التفاعلي.\n`/setup_middleman_panel` • لإرسال بانل الوسطاء التفاعلي.\n`/delete_all_channels` • لمسح كافة الرومات بالسيرفر يدوياً.\n`/delete_channel` • لحذف روم محدد.\n`/delete_all_roles` • لمسح جميع الرتب التلقائية بالسيرفر.\n`/publish_rules` • لنشر قوانين السيرفر كبطاقة إمبد.' 
                     },
                     { 
-                        name: '📊 أوامر التفاعل والمستويات', 
-                        value: '`/rank` • لعرض بطاقة المستوى وعدد رسائل العضو كصورة مخصصة.\n`/set_level_channel` • لتخصيص روم إشعارات زيادة المستوى.\n`/add_role_reward` • لربط رتبة بعدد رسائل محدد للأعضاء.' 
+                        name: '📊 أوامر التفاعل والمستويات والعملات (الجديدة)', 
+                        value: '`/rank` • لعرض بطاقة المستوى وعدد رسائل العضو كصورة مخصصة.\n`/set_level_channel` • لتخصيص روم إشعارات زيادة المستوى.\n`/set_islamic_channel` • لتخصيص روم النشر الإسلامي التلقائي.\n`/add_role_reward` • لربط رتبة بعدد رسائل محدد للأعضاء.\n`/daily` • للحصول على مكافأتك اليومية بالعملات.\n`/coins` • لعرض رصيدك ببنك ديسكورد.\n`/transfer` • لتحويل العملات للأعضاء.\n`/shop` • لعرض متجر رتب السيرفر.\n`/buy` • لشراء رتبة من المتجر الافتراضي.' 
                     },
                     { 
-                        name: '🎫 أوامر نظام التذاكر', 
+                        name: '🎫 أوامر نظام التذاكر والوسطاء', 
                         value: '`/add` • لإدخال عضو للتذكرة.\n`/remove` • لإزالة عضو من التذكرة.\n`/claim` • لاستلام تذكرة لمتابعتها.\n`/unclaim` • لترك التذكرة ليعود المشرفين لاستلامها.\n`/rename` • لتعديل اسم روم التذكرة.\n`/close` • لإغلاق وحذف التذكرة الحالية.' 
+                    },
+                    { 
+                        name: '🎁 أوامر التوزيع والـ Giveaways (الجديدة)', 
+                        value: '`/giveaway_start` • لبدء جيف اواي تفاعلي بشروط المستويات والتفاعل بالسيرفر.' 
                     },
                     { 
                         name: '🔨 أوامر الإشراف الأساسية', 
@@ -712,7 +1147,237 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ embeds: [embed] });
         }
 
-        // أمر استخراج بطاقة العضو التفاعلية والمصورة
+        // أمر الـ Giveaway المتطور والداعم لشروط المستويات لمنع الخمول والعدل
+        if (commandName === 'giveaway_start') {
+            if (!isAdministrator) {
+                return interaction.reply({ content: '❌ هذا الأمر مخصص للإداريين فقط!', ephemeral: true });
+            }
+
+            const prize = options.getString('prize');
+            const duration = options.getInteger('duration_minutes');
+            const winnersCount = options.getInteger('winners_count');
+            const levelReq = options.getInteger('level_requirement') || 0;
+
+            await interaction.reply({ content: '⏳ جاري بدء ونشر الـ Giveaway في الغرفة الحالية...', ephemeral: true });
+
+            const endTime = Date.now() + duration * 60 * 1000;
+
+            const embed = new EmbedBuilder()
+                .setTitle('🎁 سحب وجيف اواي تفاعلي جديد! 🎁')
+                .setDescription(`اضغط على الزر أدناه للدخول في السحب التلقائي.\n\n🏆 **الجائزة المقدمة:** **${prize}**\n⏱️ **المدة الزمنية:** **${duration}** دقيقة\n👤 **عدد الفائزين:** **${winnersCount}** فائز(ين)\n⭐ **الحد الأدنى لمستوى التفاعل للدخول:** المستوى **${levelReq === 0 ? 'مفتوح للجميع 🔓' : levelReq}**`)
+                .setColor(0xfbbf24)
+                .setFooter({ text: `ينتهي في` })
+                .setTimestamp(endTime);
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('join_giveaway_btn').setLabel('المشاركة في التوزيع 🎁').setStyle(ButtonStyle.Success)
+            );
+
+            const msg = await channel.send({ embeds: [embed], components: [row] });
+
+            // حفظ بيانات الـ Giveaway في الذاكرة لمتابعة السحب
+            activeGiveaways.set(msg.id, {
+                prize,
+                levelRequirement: levelReq,
+                winnersCount,
+                participants: []
+            });
+
+            // مؤقت سحب الفائزين العشوائي التلقائي
+            setTimeout(async () => {
+                const gw = activeGiveaways.get(msg.id);
+                if (!gw) return;
+
+                const winners = [];
+                const participants = gw.participants;
+
+                // التحقق من تواجد عدد كافٍ من المشاركين
+                if (participants.length > 0) {
+                    const tempParticipants = [...participants];
+                    for (let i = 0; i < Math.min(gw.winnersCount, participants.length); i++) {
+                        const randomIndex = Math.floor(Math.random() * tempParticipants.length);
+                        const winnerId = tempParticipants.splice(randomIndex, 1)[0];
+                        winners.push(`<@${winnerId}>`);
+                    }
+                }
+
+                // تحديث الإمبد لإعلان الانتهاء وأسماء الفائزين
+                const endedEmbed = new EmbedBuilder()
+                    .setTitle('🎉 انتهى السحب التفاعلي والـ Giveaway! 🎉')
+                    .setDescription(`🏆 **الجائزة الموزعة:** **${gw.prize}**\n\n👥 **الفائزين المحظوظين:**\n${winners.length > 0 ? winners.join('\n') : 'لا يوجد فائزين (لم يشارك أحد يطابق الشروط)'}`)
+                    .setColor(0x94a3b8)
+                    .setTimestamp();
+
+                const disabledRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('join_giveaway_btn').setLabel('انتهت المسابقة ❌').setStyle(ButtonStyle.Secondary).setDisabled(true)
+                );
+
+                await msg.edit({ embeds: [endedEmbed], components: [disabledRow] }).catch(() => {});
+                
+                if (winners.length > 0) {
+                    await channel.send(`🎉 مبارك الفوز لـ ${winners.join(', ')} بجائزة: **${gw.prize}**! يرجى التوجه للإدارة وتأكيد الاستلام.`);
+                }
+
+                activeGiveaways.delete(msg.id);
+
+            }, duration * 60 * 1000);
+        }
+
+        // أوامر الاقتصاد والبنك التفاعلية
+        if (commandName === 'daily') {
+            const userData = await getUserData(guild.id, interaction.user.id);
+            const now = new Date();
+
+            // فحص مهلة الـ 24 ساعة للحصول على المكافأة اليومية
+            if (userData.lastDaily) {
+                const cooldown = 24 * 60 * 60 * 1000; // 24 ساعة بالملي ثانية
+                const diff = now - new Date(userData.lastDaily);
+                if (diff < cooldown) {
+                    const timeLeft = cooldown - diff;
+                    const hours = Math.floor(timeLeft / (60 * 60 * 1000));
+                    const minutes = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
+                    return interaction.reply({ content: `❌ لقد قمت باستلام مكافأتك اليومية بالفعل! يرجى الانتظار **${hours} ساعة و ${minutes} دقيقة** للمطالبة بها مجدداً.`, ephemeral: true });
+                }
+            }
+
+            const dailyAmount = Math.floor(Math.random() * 301) + 200; // مبلغ عشوائي بين 200 و 500 عملة
+            userData.coins += dailyAmount;
+            userData.lastDaily = now;
+
+            await saveUserData(guild.id, interaction.user.id, userData);
+            await interaction.reply({ content: `🪙 تم استلام مكافأتك اليومية بنجاح بنك السيرفر! تم إيداع **${dailyAmount} BRQ Coins** في حسابك.` });
+        }
+
+        if (commandName === 'coins') {
+            const targetUser = options.getUser('user') || interaction.user;
+            const userData = await getUserData(guild.id, targetUser.id);
+
+            await interaction.reply({ content: `💰 رصيد الحساب المالي لـ ${targetUser} الحالي في بنك السيرفر هو: **${userData.coins} BRQ Coins**.` });
+        }
+
+        if (commandName === 'transfer') {
+            const targetUser = options.getUser('user');
+            const amount = options.getInteger('amount');
+
+            if (targetUser.id === interaction.user.id) {
+                return interaction.reply({ content: '❌ لا يمكنك تحويل العملات إلى حسابك الشخصي!', ephemeral: true });
+            }
+            if (amount <= 0) {
+                return interaction.reply({ content: '❌ يرجى كتابة مبلغ تحويل صحيح أكبر من صفر.', ephemeral: true });
+            }
+
+            const senderData = await getUserData(guild.id, interaction.user.id);
+            if (senderData.coins < amount) {
+                return interaction.reply({ content: `❌ رصيدك الحالي غير كافٍ لإتمام عملية التحويل (رصيدك الحالي: **${senderData.coins} BRQ Coins**).`, ephemeral: true });
+            }
+
+            const receiverData = await getUserData(guild.id, targetUser.id);
+            senderData.coins -= amount;
+            receiverData.coins += amount;
+
+            await saveUserData(guild.id, interaction.user.id, senderData);
+            await saveUserData(guild.id, targetUser.id, receiverData);
+
+            await interaction.reply({ content: `✅ تم بنجاح تحويل **${amount} BRQ Coins** من حسابك إلى العضو ${targetUser}.` });
+        }
+
+        if (commandName === 'shop') {
+            const embed = new EmbedBuilder()
+                .setTitle('🛒 متجر رتب السيرفر التفاعلي | BRQ Shop 🛒')
+                .setDescription('قم بتجميع العملات وتفاعلك بالشات لتتمكن من شراء هذه الرتب المميزة والحصول عليها تلقائياً.')
+                .setColor(0x06b6d4)
+                .addFields(
+                    { name: '🟢 الرتب الأساسية المتوفرة للشراء:', value: '• **Level 5 Member** ⬅️ القيمة: `1500` عملة 🪙\n• **Level 10 Member** ⬅️ القيمة: `3000` عملة 🪙\n• **Level 20 Member** ⬅️ القيمة: `6000` عملة 🪙' },
+                    { name: '✨ رتب الـ VIP الفاخرة المتاحة للشراء:', value: '• **VIP Elite** ⬅️ القيمة: `15000` عملة 🪙\n• **VIP Legendary** ⬅️ القيمة: `30000` عملة 🪙\n• **VIP Mythic** ⬅️ القيمة: `50000` عملة 🪙' }
+                )
+                .setFooter({ text: 'لشراء رتبة محددة، استخدم الأمر: /buy' })
+                .setTimestamp();
+
+            await interaction.reply({ embeds: [embed] });
+        }
+
+        if (commandName === 'buy') {
+            const targetRole = options.getRole('role');
+            
+            // تحديد أسعار الرتب المتوفرة للشراء بدقة
+            const shopPrices = {
+                "Level 5 Member": 1500,
+                "Level 10 Member": 3000,
+                "Level 20 Member": 6000,
+                "VIP Elite": 15000,
+                "VIP Legendary": 30000,
+                "VIP Mythic": 50000
+            };
+
+            const price = shopPrices[targetRole.name];
+            if (!price) {
+                return interaction.reply({ content: '❌ هذه الرتبة غير معروضة للبيع في متجر السيرفر حالياً. يرجى مراجعة معروضات المتجر عبر أمر `/shop`.', ephemeral: true });
+            }
+
+            if (member.roles.cache.has(targetRole.id)) {
+                return interaction.reply({ content: '❌ أنت تمتلك هذه الرتبة بالفعل مسبقاً في حسابك!', ephemeral: true });
+            }
+
+            const userData = await getUserData(guild.id, interaction.user.id);
+            if (userData.coins < price) {
+                return interaction.reply({ content: `❌ رصيدك الحالي في البنك غير كافٍ لشراء هذه الرتبة (القيمة: **${price}** عملة، رصيدك الحالي: **${userData.coins}** عملة).`, ephemeral: true });
+            }
+
+            // إتمام عملية الشراء وخصم العملات وإعطاء الرتبة تلقائياً
+            try {
+                userData.coins -= price;
+                await saveUserData(guild.id, interaction.user.id, userData);
+                await member.roles.add(targetRole);
+
+                await interaction.reply({ content: `🎉 مبارك الفوز! لقد قمت بشراء رتبة **${targetRole.name}** بنجاح من متجر السيرفر، وتم خصم **${price} BRQ Coins** من حسابك بنك السيرفر.` });
+            } catch (e) {
+                console.error(e);
+                await interaction.reply({ content: '❌ حدث خطأ برمي أثناء محاولة منحك الرتبة، يرجى التأكد من أن رتبة البوت أعلى من الرتبة المراد شراؤها.', ephemeral: true });
+            }
+        }
+
+        // إعداد وتخصيص الروم الإسلامي للأذكار التلقائية
+        if (commandName === 'set_islamic_channel') {
+            if (!isAdministrator) {
+                return interaction.reply({ content: '❌ هذا الأمر مخصص للإداريين فقط!', ephemeral: true });
+            }
+            const targetChannel = options.getChannel('channel');
+            try {
+                const config = await getGuildConfig(guild.id);
+                config.islamicChannelId = targetChannel.id;
+                await saveGuildConfig(guild.id, config);
+
+                await interaction.reply({ content: `✅ تم بنجاح تحديد الغرفة ${targetChannel} كغرفة مخصصة لنشر الآيات والأذكار التلقائية كل ساعة.`, ephemeral: true });
+            } catch (e) {
+                await interaction.reply({ content: `❌ فشل حفظ الإعداد: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        // بقية الأوامر الإدارية الأساسية والوسطاء
+        if (commandName === 'setup_middleman_panel') {
+            if (!isAdministrator) {
+                return interaction.reply({ content: '❌ هذا الأمر مخصص للإداريين فقط!', ephemeral: true });
+            }
+
+            const embed = new EmbedBuilder()
+                .setTitle('⚖️ بوابة صفقات الوسطاء المعتمدين الآمنة ⚖️')
+                .setDescription('تجنب عمليات النصب خارج السيرفر بالكامل! يرجى الضغط على الزر بالأسفل لفتح تذكرة طلب وساطة رسمية للتنسيق وتأمين صفقاتك (بيع، شراء، استبدال) تحت إشراف طاقم وسطائنا المعتمدين.')
+                .setColor(0x00AAAA)
+                .setFooter({ text: 'طاقم وسطاء سيرفر BRQ Community' });
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('request_middleman_btn').setLabel('طلب وسيط معتمد ⚖️').setStyle(ButtonStyle.Primary)
+            );
+
+            try {
+                await interaction.channel.send({ embeds: [embed], components: [row] });
+                await interaction.reply({ content: '✅ تم إرسال لوحة التحكم بالوسطاء المعتمدين بنجاح!', ephemeral: true });
+            } catch (e) {
+                await interaction.reply({ content: `❌ فشل إرسال اللوحة: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        // الأوامر المتبقية
         if (commandName === 'rank') {
             await interaction.deferReply();
             
@@ -727,11 +1392,9 @@ client.on('interactionCreate', async (interaction) => {
                 const userData = await getUserData(guild.id, targetUser.id);
                 const nextLevelXP = userData.level * 150;
 
-                // جلب الجائزة القادمة وحساب المتبقي من الرسائل
                 const config = await getGuildConfig(guild.id);
                 let rewardStatusText = 'لا توجد رتب مكافآت متبقية (أنت في القمة! 👑)';
                 if (config && config.roleRewards && config.roleRewards.length > 0) {
-                    // ترتيب المكافآت لمعرفة أقرب واحدة
                     const sortedRewards = [...config.roleRewards].sort((a, b) => a.messagesNeeded - b.messagesNeeded);
                     const nextReward = sortedRewards.find(r => userData.messageCount < r.messagesNeeded);
                     if (nextReward) {
@@ -742,7 +1405,6 @@ client.on('interactionCreate', async (interaction) => {
                     }
                 }
 
-                // إنشاء لوحة الرسم بأبعاد الصورة المرفقة تماماً (1280x543)
                 const canvas = createCanvas(1280, 543);
                 const ctx = canvas.getContext('2d');
 
@@ -776,7 +1438,6 @@ client.on('interactionCreate', async (interaction) => {
 
                 ctx.shadowBlur = 0;
 
-                // كتابة تفاصيل المستوى وعدد الرسائل الحالية بشكل منسق جداً
                 ctx.fillStyle = '#FFFFFF';
                 ctx.font = 'bold 38px sans-serif';
                 ctx.fillText(targetUser.username, 360, 130);
@@ -793,12 +1454,10 @@ client.on('interactionCreate', async (interaction) => {
                 ctx.font = 'bold 20px sans-serif';
                 ctx.fillText(rewardStatusText, 360, 375);
 
-                // كتابة آي دي العضو في أعلى جهة اليمين
                 ctx.fillStyle = '#a855f7';
                 ctx.font = 'bold 22px sans-serif';
                 ctx.fillText(`ID: ${targetUser.id}`, 980, 60);
 
-                // رسم شريط التقدم للخبرة (Progress Bar)
                 const barWidth = 850;
                 const barHeight = 24;
                 const barX = 360;
@@ -831,7 +1490,7 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        // أمر تحديد الغرفة المخصصة لرسائل ليفل أب
+        // بقية الأوامر والتهيئة
         if (commandName === 'set_level_channel') {
             if (!isAdministrator) {
                 return interaction.reply({ content: '❌ هذا الأمر مخصص للإداريين فقط!', ephemeral: true });
@@ -848,7 +1507,6 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        // أمر ربط الرتبة بعدد الرسائل المطلوبة (مكافأة)
         if (commandName === 'add_role_reward') {
             if (!isAdministrator) {
                 return interaction.reply({ content: '❌ هذا الأمر مخصص للإداريين فقط!', ephemeral: true });
@@ -870,7 +1528,6 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        // أمر فتح النافذة المنبثقة لنشر القوانين
         if (commandName === 'publish_rules') {
             if (!isAdministrator) {
                 return interaction.reply({ content: '❌ هذا الأمر مخصص لمن يمتلكون صلاحية الإدارة (Administrator) فقط!', ephemeral: true });
@@ -905,192 +1562,46 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// جلب إعدادات العضو أو السيرفر الافتراضية
-async function getGuildConfig(guildId) {
+// جلب إعدادات العضو
+async function getUserData(guildId, userId) {
     if (useMongoDB) {
-        let config = await GuildConfigModel.findOne({ guildId });
-        if (!config) {
-            config = new GuildConfigModel({ guildId, levelChannelId: null, roleRewards: [] });
-            await config.save();
+        let data = await UserLevelModel.findOne({ guildId, userId });
+        if (!data) {
+            data = new UserLevelModel({ guildId, userId, level: 1, xp: 0, messageCount: 0, coins: 0, lastDaily: null });
+            await data.save();
         }
-        return config;
+        return data;
     } else {
         if (!localDatabase[guildId]) localDatabase[guildId] = {};
-        if (!localDatabase[guildId].config) {
-            localDatabase[guildId].config = { levelChannelId: null, roleRewards: [] };
+        if (!localDatabase[guildId].users) localDatabase[guildId].users = {};
+        if (!localDatabase[guildId].users[userId]) {
+            localDatabase[guildId].users[userId] = { level: 1, xp: 0, messageCount: 0, coins: 0, lastDaily: null };
         }
-        return localDatabase[guildId].config;
+        return localDatabase[guildId].users[userId];
     }
 }
 
-// حفظ الإعدادات الافتراضية
-async function saveGuildConfig(guildId, configData) {
+// حفظ بيانات العضو
+async function saveUserData(guildId, userId, data) {
     if (useMongoDB) {
-        await GuildConfigModel.updateOne({ guildId }, {
-            levelChannelId: configData.levelChannelId,
-            roleRewards: configData.roleRewards
+        await UserLevelModel.updateOne({ guildId, userId }, {
+            level: data.level,
+            xp: data.xp,
+            messageCount: data.messageCount,
+            coins: data.coins,
+            lastDaily: data.lastDaily
         });
     } else {
-        localDatabase[guildId].config = configData;
+        localDatabase[guildId].users[userId] = {
+            level: data.level,
+            xp: data.xp,
+            messageCount: data.messageCount,
+            coins: data.coins,
+            lastDaily: data.lastDaily
+        };
         fs.writeFileSync('./database.json', JSON.stringify(localDatabase, null, 2));
     }
 }
-
-// أمر التهيئة الكامل لإنشاء الرومات و 100 رتبة وتوزيع الصلاحيات الصارمة ونشر إرشادات المستويات التلقائية للجميع
-client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
-    const { commandName, guild, member } = interaction;
-    const isAdministrator = member.permissions.has(PermissionFlagsBits.Administrator);
-
-    if (commandName === 'setup_server') {
-        if (!isAdministrator) {
-            return interaction.reply({ content: '❌ هذا الأمر مخصص لمن يمتلكون صلاحية الإدارة (Administrator) فقط!', ephemeral: true });
-        }
-        await interaction.reply({ content: '⏳ جاري بدء تهيئة السيرفر بالكامل وتنسيق الرومات وإنشاء 100 رتبة وتوزيع الصلاحيات، يرجى الانتظار...', ephemeral: true });
-
-        try {
-            // 1. إنشاء رتب الإدارة الخمسين (50 Management Roles)
-            const createdManagementRoles = {};
-            for (const roleName of MANAGEMENT_ROLES) {
-                const role = await guild.roles.create({ name: roleName, color: 0x3498DB });
-                createdManagementRoles[roleName] = role;
-                await sleep(150);
-            }
-
-            // 2. إنشاء رتب الأعضاء الخمسين (50 Member Roles)
-            const createdMemberRoles = {};
-            for (const roleName of MEMBER_ROLES) {
-                // how
-                // 
-                // for items
-                const role = await guild.roles.create({ name: roleName, color: 0x2ECC71 });
-                createdMemberRoles[roleName] = role;
-                await sleep(150);
-            }
-
-            const ownerRole = createdManagementRoles["Owner"];
-            const highAdminRole = createdManagementRoles["High Admin"];
-            const adminRole = createdManagementRoles["Admin"];
-            const staffRole = createdManagementRoles["Staff"];
-            const middlemanRole = createdManagementRoles["Middleman (الوسيط)"];
-            const mmManagerRole = createdManagementRoles["Middleman Manager"];
-
-            // 3. البدء في إنشاء الرومات مع تطبيق الصلاحيات بشكل صارم ومنع التداخل
-            for (const group of STRUCTURE) {
-                let category = null;
-                let overwrites = [];
-
-                if (group.category === "👑 | Owner") {
-                    overwrites = [
-                        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
-                    ];
-                    if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                } else if (group.category === "🛠️ | Staff" || group.category === "🛠️ | Logo") {
-                    overwrites = [
-                        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
-                    ];
-                    if (staffRole) overwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                    if (adminRole) overwrites.push({ id: adminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                    if (highAdminRole) overwrites.push({ id: highAdminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                    if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                } else if (group.category === "⚖️ | BRQ - Meditators") {
-                    overwrites = [
-                        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }
-                    ];
-                    if (middlemanRole) overwrites.push({ id: middlemanRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                    if (mmManagerRole) overwrites.push({ id: mmManagerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                    if (staffRole) overwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                    if (adminRole) overwrites.push({ id: adminRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                    if (ownerRole) overwrites.push({ id: ownerRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-                }
-
-                if (group.category) {
-                    category = await guild.channels.create({
-                        name: group.category,
-                        type: ChannelType.GuildCategory,
-                        permissionOverwrites: overwrites
-                    });
-                    await sleep(500);
-                }
-
-                for (const ch of group.channels) {
-                    await guild.channels.create({
-                        name: ch.name,
-                        type: ch.type === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText,
-                        parent: category ? category.id : null,
-                        userLimit: ch.userLimit || undefined,
-                        permissionOverwrites: category ? category.permissionOverwrites.cache.map(o => o) : []
-                    });
-                    await sleep(500);
-                }
-            }
-
-            // 4. تهيئة وضبط مكافآت الرتب التلقائية فوراً وحفظها في قاعدة البيانات
-            const config = await getGuildConfig(guild.id);
-            config.roleRewards = [];
-
-            // خريطة بمكافآت الرتب التلقائية الافتراضية المناسبة للأعضاء
-            const defaultRewardsLayout = [
-                { name: "Level 1 Member", messages: 50 },
-                { name: "Level 5 Member", messages: 150 },
-                { name: "Level 10 Member", messages: 300 },
-                { name: "Level 15 Member", messages: 500 },
-                { name: "Level 20 Member", messages: 750 },
-                { name: "Level 25 Member", messages: 1000 },
-                { name: "VIP Elite", messages: 1500 },
-                { name: "VIP Legendary", messages: 2000 },
-                { name: "VIP Mythic", messages: 3000 }
-            ];
-
-            let rewardListDescription = '';
-            for (const item of defaultRewardsLayout) {
-                const role = createdMemberRoles[item.name];
-                if (role) {
-                    config.roleRewards.push({ roleId: role.id, messagesNeeded: item.messages });
-                    rewardListDescription += `• عند الوصول إلى **${item.messages}** رسالة ⬅️ تُمنح تلقائياً رتبة **${role.name}**\n`;
-                }
-            }
-            await saveGuildConfig(guild.id, config);
-
-            // 5. إنشاء الغرفة المخصصة لإرشادات المستويات ونشر الإرشادات بها تلقائياً للوضوح والشفافية التامة
-            const guideCategory = guild.channels.cache.find(c => c.name === '🌍 | Start' && c.type === ChannelType.GuildCategory);
-            const guideChannel = await guild.channels.create({
-                name: '🔒・إرشادات • المستويات',
-                type: ChannelType.GuildText,
-                parent: guideCategory ? guideCategory.id : null
-            });
-
-            const guideEmbed = new EmbedBuilder()
-                .setTitle('📊 دليل ومكافآت نظام المستويات والتفاعل بالسيرفر')
-                .setDescription('مرحباً بكم جميعاً! تم إعداد وتفعيل نظام تفاعلي متطور يمنحكم نقاط خبرة ورتباً بشكل ذاتي عند تفاعلكم ومشاركتكم في السيرفر لضمان الشفافية والوضوح للجميع.')
-                .setColor(0xa855f7)
-                .addFields(
-                    { 
-                        name: '📈 كيف يعمل نظام المستويات؟', 
-                        value: 'كل رسالة ترسلها في رومات السيرفر تمنحك نقاط خبرة (XP) عشوائية وتزيد معدل رسائلك اليومي والتراكمي. يمكنك دائماً التحقق من بطاقتك الشخصية وصورتك عبر كتابة الأمر: `/rank`' 
-                    },
-                    { 
-                        name: '🎁 مكافآت الرتب التفاعلية التلقائية (Milestones):', 
-                        value: rewardListDescription || 'سيتم إدراج الرتب هنا تلقائياً بمجرد إتمام التثبيت.' 
-                    },
-                    { 
-                        name: '🏆 الترقية الفورية والجوائز:', 
-                        value: 'يقوم البوت تلقائياً بتحديث رتبتك ومنحك الرتب التفاعلية بمجرد بلوغك لعدد الرسائل الموضح أعلاه فوراً مع منشن وإشعار مصور رائع يظهر لجميع الأعضاء.' 
-                    }
-                )
-                .setFooter({ text: 'نتمنى لكم قضاء وقت ممتع وتفاعل استثنائي في BRQ Community' })
-                .setTimestamp();
-
-            await guideChannel.send({ embeds: [guideEmbed] });
-
-            await interaction.followUp({ content: '✅ تم الانتهاء من إعداد الرومات وتوزيع الصلاحيات وإنشاء 100 رتبة ونشر دليل المستويات بنجاح!', ephemeral: true });
-
-        } catch (e) {
-            console.error(e);
-            await interaction.followUp({ content: `❌ حدث خطأ أثناء إعداد الرومات: ${e.message}`, ephemeral: true });
-        }
-    }
-});
 
 const TOKEN = process.env.DISCORD_TOKEN || 'ضع_توكن_البوت_الخاص_بِك_هنا';
 client.login(TOKEN);
