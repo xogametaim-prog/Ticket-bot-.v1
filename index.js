@@ -1,7 +1,301 @@
-[
-  {
-    "filename": "index.js",
-    "description": "الملف الأول (المين): الكود النقي والكامل لملف التشغيل الأساسي للبوت، ويحتوي على نظام الاتصال بقاعدة البيانات وحفظها، نظام التذاكر، الأوامر الإدارية (الحظر والكتم)، بالإضافة إلى 3 ألعاب تفاعلية بالأزرار (الثعبان، إكس أو، وتخمين الكلمات).",
-    "content": "const {\n    Client, GatewayIntentBits, ChannelType, PermissionFlagsBits, \n    ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder\n} = require('discord.js');\nconst mongoose = require('mongoose');\nconst fs = require('fs');\nconst { Wordle, TicTacToe, Snake } = require('discord-gamecord');\n\nconst client = new Client({\n    intents: [\n        GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, \n        GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers, \n        GatewayIntentBits.GuildVoiceStates\n    ]\n});\n\nconst sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));\n\n// --- إعداد قاعدة البيانات لحفظ المعلومات بشكل دائم ---\nconst MONGO_URI = process.env.MONGO_URI;\nlet useMongoDB = false;\nlet localDatabase = {};\n\nif (MONGO_URI) {\n    mongoose.connect(MONGO_URI)\n        .then(() => { console.log('✅ Connected to MongoDB.'); useMongoDB = true; })\n        .catch(() => console.log('❌ Database Connection Failed. Using JSON Fallback.'));\n} else {\n    if (fs.existsSync('./database.json')) {\n        try { localDatabase = JSON.parse(fs.readFileSync('./database.json', 'utf8')); } catch (e) { localDatabase = {}; }\n    }\n}\n\nconst configSchema = new mongoose.Schema({\n    guildId: String,\n    ticketCategoryId: String,\n    logsChannelId: String\n});\nconst GuildConfigModel = mongoose.model('GuildConfig', configSchema);\n\nasync function getGuildConfig(guildId) {\n    if (useMongoDB) {\n        let config = await GuildConfigModel.findOne({ guildId });\n        if (!config) {\n            config = new GuildConfigModel({ guildId, ticketCategoryId: null, logsChannelId: null });\n            await config.save();\n        }\n        return config;\n    } else {\n        if (!localDatabase[guildId]) localDatabase[guildId] = {};\n        if (!localDatabase[guildId].config) {\n            localDatabase[guildId].config = { ticketCategoryId: null, logsChannelId: null };\n        }\n        return localDatabase[guildId].config;\n    }\n}\n\nasync function saveGuildConfig(guildId, configData) {\n    if (useMongoDB) {\n        await GuildConfigModel.updateOne({ guildId }, {\n            ticketCategoryId: configData.ticketCategoryId,\n            logsChannelId: configData.logsChannelId\n        });\n    } else {\n        localDatabase[guildId].config = configData;\n        fs.writeFileSync('./database.json', JSON.stringify(localDatabase, null, 2));\n    }\n}\n\n// إرسال سجل الإجراءات الموحد\nasync function sendLog(guild, embed) {\n    const config = await getGuildConfig(guild.id);\n    if (config && config.logsChannelId) {\n        const channel = guild.channels.cache.get(config.logsChannelId);\n        if (channel) await channel.send({ embeds: [embed] }).catch(() => {});\n    }\n}\n\nclient.once('ready', async () => {\n    console.log(`تم تسجيل الدخول بنجاح كـ: ${client.user.tag}`);\n    \n    const commands = [\n        {\n            name: 'ban',\n            description: 'حظر عضو من السيرفر',\n            options: [\n                { name: 'member', type: 6, description: 'العضو المراد حظره', required: true },\n                { name: 'reason', type: 3, description: 'السبب', required: false }\n            ]\n        },\n        {\n            name: 'timeout',\n            description: 'إعطاء تايم أوت (كتم مؤقت) لعضو في السيرفر',\n            options: [\n                { name: 'member', type: 6, description: 'العضو المراد كتمه', required: true },\n                { name: 'minutes', type: 4, description: 'المدة بالدقائق', required: true },\n                { name: 'reason', type: 3, description: 'السبب', required: false }\n            ]\n        },\n        { \n            name: 'setup_tickets',\n            description: 'إرسال لوحة التحكم بنظام التذاكر' \n        },\n        {\n            name: 'game_wordle',\n            description: 'بدء لعبة تخمين الكلمات Wordle الشهيرة داخل الشات بالتفاعل'\n        },\n        {\n            name: 'game_tictactoe',\n            description: 'بدء لعبة إكس أو (Tic Tac Toe) تفاعلية ضد عضو آخر بالسيرفر',\n            options: [\n                { name: 'opponent', type: 6, description: 'العضو المراد اللعب ضده', required: true }\n            ]\n        },\n        {\n            name: 'game_snake',\n            description: 'بدء لعبة الثعبان (Snake Game) الكلاسيكية التفاعلية بالأزرار'\n        }\n    ];\n\n    try {\n        await client.application.commands.set(commands);\n        console.log('Registered application commands successfully.');\n    } catch (e) { console.error(e); }\n});\n\n// معالجة الأوامر والتفاعلات والأزرار\nclient.on('interactionCreate', async (interaction) => {\n    if (interaction.isButton()) {\n        const { guild, member, customId, channel } = interaction;\n\n        // نظام التذاكر التفاعلي المقفل بالأزرار\n        if (customId === 'open_ticket_btn') {\n            await interaction.deferReply({ ephemeral: true });\n            const config = await getGuildConfig(guild.id);\n            \n            const overwrites = [\n                { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },\n                { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },\n                { id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }\n            ];\n\n            try {\n                const ticketChannel = await guild.channels.create({\n                    name: `🎫-${member.user.username}`,\n                    type: ChannelType.GuildText,\n                    parent: config.ticketCategoryId || null,\n                    permissionOverwrites: overwrites\n                });\n\n                const embed = new EmbedBuilder()\n                    .setTitle('نظام التذاكر والأمن الموحد')\n                    .setDescription(`مرحباً بك <@\${member.id}> في الدعم الفني الخاص بك.\\nالرجاء طرح تفاصيل مشكلتك هنا بوضوح لكي يقوم المشرفون بالرد عليك في أقرب وقت ممكن.`)\n                    .setColor(0x00FF00);\n\n                const closeRow = new ActionRowBuilder().addComponents(\n                    new ButtonBuilder().setCustomId('close_ticket_btn').setLabel('إغلاق التذكرة والأرشفة 🔒').setStyle(ButtonStyle.Danger)\n                );\n\n                await ticketChannel.send({ embeds: [embed], components: [closeRow] });\n                await interaction.followUp({ content: `✅ تم إنشاء تذكرتك بنجاح: \${ticketChannel}`, ephemeral: true });\n\n                // لوق فتح التذكرة\n                const logEmbed = new EmbedBuilder()\n                    .setTitle('🟢 تذكرة جديدة تم فتحها')\n                    .setDescription(`صاحب التذكرة: <@\${member.id}> (\${member.id})\\nاسم القناة: \underline{\${ticketChannel}}`)\n                    .setColor(0x2ECC71).setTimestamp();\n                await sendLog(guild, logEmbed);\n\n            } catch (e) { \n                console.error(e);\n                await interaction.followUp({ content: '❌ حدث خطأ غير متوقع أثناء إعداد وتفعيل روم التذكرة.', ephemeral: true });\n            }\n        }\n\n        if (customId === 'close_ticket_btn') {\n            await interaction.reply({ content: '⏳ سيتم إغلاق وحذف روم التذكرة وتدوين السجل التفاعلي خلال 5 ثوانٍ...' });\n            \n            const logEmbed = new EmbedBuilder()\n                .setTitle('🔴 تذكرة تم إغلاقها وحذفها')\n                .setDescription(`المسؤول المعني بالإغلاق: <@\${member.id}> (\${member.id})\\nاسم روم التذكرة: \\\`\${channel.name}\\\``)\n                .setColor(0xE74C3C).setTimestamp();\n            await sendLog(guild, logEmbed);\n\n            setTimeout(() => channel.delete().catch(() => {}), 5000);\n        }\n    }\n\n    if (interaction.isChatInputCommand()) {\n        const { commandName, options, guild, member, channel } = interaction;\n\n        // حظر عضو\n        if (commandName === 'ban') {\n            if (!member.permissions.has(PermissionFlagsBits.BanMembers)) {\n                return interaction.reply({ content: '❌ لا تملك صلاحية حظر الأعضاء.', ephemeral: true });\n            }\n            const target = options.getMember('member');\n            const reason = options.getString('reason') || 'لا يوجد سبب';\n            if (!target) return interaction.reply({ content: '❌ لم يتم العثور على هذا العضو.', ephemeral: true });\n            try {\n                await target.ban({ reason });\n                await interaction.reply({ content: `✅ تم حظر \${target} بنجاح. السبب: \${reason}` });\n                \n                const logEmbed = new EmbedBuilder().setTitle('🔨 حظر عضو جديد').setDescription(`العضو المحظور: \${target} (\${target.id})\\nبواسطة: <@\${member.id}>\\nالسبب: \${reason}`).setColor(0xE74C3C).setTimestamp();\n                await sendLog(guild, logEmbed);\n            } catch (e) { await interaction.reply({ content: `❌ فشل الحظر: \${e.message}`, ephemeral: true }); }\n        }\n\n        // كتم عضو\n        if (commandName === 'timeout') {\n            if (!member.permissions.has(PermissionFlagsBits.ModerateMembers)) {\n                return interaction.reply({ content: '❌ لا تملك صلاحية كتم الأعضاء.', ephemeral: true });\n            }\n            const target = options.getMember('member');\n            const minutes = options.getInteger('minutes');\n            const reason = options.getString('reason') || 'لا يوجد سبب';\n            if (!target) return interaction.reply({ content: '❌ لم يتم العثور على هذا العضو.', ephemeral: true });\n            try {\n                const duration = minutes * 60 * 1000;\n                await target.timeout(duration, reason);\n                await interaction.reply({ content: `✅ تم كتم العضو \${target} بنجاح لـ \${minutes} دقيقة.` });\n\n                const logEmbed = new EmbedBuilder().setTitle('🔇 كتم عضو (Timeout)').setDescription(`العضو المكتوم: \${target}\\nالمدة بالدقائق: \${minutes}\\nبواسطة: <@\${member.id}>`).setColor(0xfbbf24).setTimestamp();\n                await sendLog(guild, logEmbed);\n            } catch (e) { await interaction.reply({ content: `❌ فشل الكتم: \${e.message}`, ephemeral: true }); }\n        }\n\n        // إرسال لوحة تذاكر التفاعل والمشكلات\n        if (commandName === 'setup_tickets') {\n            if (!member.permissions.has(PermissionFlagsBits.Administrator)) {\n                return interaction.reply({ content: '❌ هذا الأمر مخصص للإداريين فقط!', ephemeral: true });\n            }\n\n            const embed = new EmbedBuilder()\n                .setTitle('تذكرة الدعم الفني والمساعدة 🎫')\n                .setDescription('إذا كنت تواجه مشكلة، ترغب بتقديم شكوى أو التحدث للإدارة، اضغط على الزر بالأسفل لفتح تذكرة خاصة بك.')\n                .setColor(0x3b82f6);\n\n            const row = new ActionRowBuilder().addComponents(\n                new ButtonBuilder().setCustomId('open_ticket_btn').setLabel('فتح تذكرة 🎫').setStyle(ButtonStyle.Success)\n            );\n\n            try {\n                await channel.send({ embeds: [embed], components: [row] });\n                await interaction.reply({ content: '✅ تم إرسال لوحة التذاكر التفاعلية بنجاح!', ephemeral: true });\n            } catch (e) { await interaction.reply({ content: `❌ فشل إرسال اللوحة: \${e.message}`, ephemeral: true }); }\n        }\n\n        // الألعاب التفاعلية الثلاثة الجديدة تماماً بالأزرار والذكية:\n        \n        // 1. لعبة الكلمات Wordle\n        if (commandName === 'game_wordle') {\n            const Game = new Wordle({\n                message: interaction,\n                isSlashGame: true,\n                embed: { title: 'لعبة تخمين الكلمات Wordle 📝', color: '#5865F2' },\n                customWord: null,\n                timeoutTime: 60000,\n                winMessage: '🎉 تهانينا! لقد نجحت بتخمين الكلمة الصحيحة وهي **{word}** بنجاح!',\n                loseMessage: '❌ للأسف! لم تنجح بالتخمين، الكلمة الصحيحة هي: **{word}**',\n                playerOnlyMessage: 'هذا الزر مخصص فقط لـ {player} للعب.'\n            });\n            Game.startGame();\n        }\n\n        // 2. لعبة إكس أو TicTacToe\n        if (commandName === 'game_tictactoe') {\n            const opponent = options.getUser('opponent');\n            if (opponent.id === interaction.user.id) return interaction.reply({ content: '❌ لا يمكنك اللعب ضد نفسك!', ephemeral: true });\n            if (opponent.bot) return interaction.reply({ content: '❌ لا يمكنك اللعب ضد البوتات!', ephemeral: true });\n\n            const Game = new TicTacToe({\n                message: interaction,\n                isSlashGame: true,\n                opponent: opponent,\n                embed: { title: 'لعبة إكس أو | Tic Tac Toe 🎮', color: '#5865F2' },\n                emojis: { xButton: '❌', oButton: '🔵', blankButton: '➖' },\n                mentionUser: true,\n                timeoutTime: 60000,\n                xMessage: '🎉 مبارك الفوز لـ {player} (❌)!',\n                oMessage: '🎉 مبارك الفوز لـ {player} (🔵)!',\n                drawMessage: '⚔️ انتهت المباراة بالتعادل بين الطرفين!',\n                requestDelay: 5000,\n                askMessage: 'مرحباً {opponent}، هل تقبل تحدي {player} في مباراة إكس أو تفاعلية؟',\n                rejectMessage: '❌ رفض الطرف الآخر التحدي المقترح من قبلك.',\n                timeoutMessage: '❌ انتهى الوقت المحدد للاستجابة للمباراة.',\n                playerOnlyMessage: 'هذا التفاعل مخصص فقط لـ {player} و {opponent}.'\n            });\n            Game.startGame();\n        }\n\n        // 3. لعبة الثعبان Snake\n        if (commandName === 'game_snake') {\n            const Game = new Snake({\n                message: interaction,\n                isSlashGame: true,\n                embed: { title: 'لعبة الثعبان التفاعلية الكلاسيكية 🐍', overTitle: 'انتهت اللعبة! 💀', color: '#5865F2' },\n                emojis: { board: '⬛', food: '🍎', up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️' },\n                stopButton: 'إيقاف اللعبة 🛑',\n                timeoutTime: 60000,\n                snake: { head: '🟢', body: '🟩', tail: '🟢', over: '💀' },\n                foods: ['🍎', '🍇', '🍊', '🍓'],\n                playerOnlyMessage: 'أزرار اللعب مخصصة فقط لـ {player}.'\n            });\n            Game.startGame();\n        }\n    }\n});\n\n// تشغيل شاشة التحكم والداش بورد لـ Render\nconst startDashboard = require('./server.js');\nstartDashboard(client, getGuildConfig, saveGuildConfig);\n\nconst TOKEN = process.env.DISCORD_TOKEN || 'your_token_here';\nclient.login(TOKEN);"
-  }
-]
+const {
+    Client, GatewayIntentBits, ChannelType, PermissionFlagsBits, 
+    ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder
+} = require('discord.js');
+const mongoose = require('mongoose');
+const fs = require('fs');
+const { Wordle, TicTacToe, Snake } = require('discord-gamecord');
+
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers, 
+        GatewayIntentBits.GuildVoiceStates
+    ]
+});
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const MONGO_URI = process.env.MONGO_URI;
+let useMongoDB = false;
+let localDatabase = {};
+
+if (MONGO_URI) {
+    mongoose.connect(MONGO_URI)
+        .then(() => { console.log('✅ Connected to MongoDB.'); useMongoDB = true; })
+        .catch(() => console.log('❌ Database Connection Failed. Using JSON Fallback.'));
+} else {
+    if (fs.existsSync('./database.json')) {
+        try { localDatabase = JSON.parse(fs.readFileSync('./database.json', 'utf8')); } catch (e) { localDatabase = {}; }
+    }
+}
+
+const configSchema = new mongoose.Schema({
+    guildId: String,
+    ticketCategoryId: String,
+    logsChannelId: String
+});
+const GuildConfigModel = mongoose.model('GuildConfig', configSchema);
+
+async function getGuildConfig(guildId) {
+    if (useMongoDB) {
+        let config = await GuildConfigModel.findOne({ guildId });
+        if (!config) {
+            config = new GuildConfigModel({ guildId, ticketCategoryId: null, logsChannelId: null });
+            await config.save();
+        }
+        return config;
+    } else {
+        if (!localDatabase[guildId]) localDatabase[guildId] = {};
+        if (!localDatabase[guildId].config) {
+            localDatabase[guildId].config = { ticketCategoryId: null, logsChannelId: null };
+        }
+        return localDatabase[guildId].config;
+    }
+}
+
+async function saveGuildConfig(guildId, configData) {
+    if (useMongoDB) {
+        await GuildConfigModel.updateOne({ guildId }, {
+            ticketCategoryId: configData.ticketCategoryId,
+            logsChannelId: configData.logsChannelId
+        });
+    } else {
+        localDatabase[guildId].config = configData;
+        fs.writeFileSync('./database.json', JSON.stringify(localDatabase, null, 2));
+    }
+}
+
+async function sendLog(guild, embed) {
+    const config = await getGuildConfig(guild.id);
+    if (config && config.logsChannelId) {
+        const channel = guild.channels.cache.get(config.logsChannelId);
+        if (channel) await channel.send({ embeds: [embed] }).catch(() => {});
+    }
+}
+
+client.once('ready', async () => {
+    console.log(`تم تسجيل الدخول بنجاح كـ: ${client.user.tag}`);
+    
+    const commands = [
+        {
+            name: 'ban',
+            description: 'حظر عضو من السيرفر',
+            options: [
+                { name: 'member', type: 6, description: 'العضو المراد حظره', required: true },
+                { name: 'reason', type: 3, description: 'السبب', required: false }
+            ]
+        },
+        {
+            name: 'timeout',
+            description: 'إعطاء تايم أوت (كتم مؤقت) لعضو في السيرفر',
+            options: [
+                { name: 'member', type: 6, description: 'العضو المراد كتمه', required: true },
+                { name: 'minutes', type: 4, description: 'المدة بالدقائق', required: true },
+                { name: 'reason', type: 3, description: 'السبب', required: false }
+            ]
+        },
+        { 
+            name: 'setup_tickets',
+            description: 'إرسال لوحة التحكم بنظام التذاكر' 
+        },
+        {
+            name: 'game_wordle',
+            description: 'بدء لعبة تخمين الكلمات Wordle الشهيرة داخل الشات بالتفاعل'
+        },
+        {
+            name: 'game_tictactoe',
+            description: 'بدء لعبة إكس أو (Tic Tac Toe) تفاعلية ضد عضو آخر بالسيرفر',
+            options: [
+                { name: 'opponent', type: 6, description: 'العضو المراد اللعب ضده', required: true }
+            ]
+        },
+        {
+            name: 'game_snake',
+            description: 'بدء لعبة الثعبان (Snake Game) الكلاسيكية التفاعلية بالأزرار'
+        }
+    ];
+
+    try {
+        await client.application.commands.set(commands);
+        console.log('Registered application commands successfully.');
+    } catch (e) { console.error(e); }
+});
+
+client.on('interactionCreate', async (interaction) => {
+    if (interaction.isButton()) {
+        const { guild, member, customId, channel } = interaction;
+
+        if (customId === 'open_ticket_btn') {
+            await interaction.deferReply({ ephemeral: true });
+            const config = await getGuildConfig(guild.id);
+            
+            const overwrites = [
+                { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+                { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+                { id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+            ];
+
+            try {
+                const ticketChannel = await guild.channels.create({
+                    name: `🎫-${member.user.username}`,
+                    type: ChannelType.GuildText,
+                    parent: config.ticketCategoryId || null,
+                    permissionOverwrites: overwrites
+                });
+
+                const embed = new EmbedBuilder()
+                    .setTitle('نظام التذاكر والأمن الموحد')
+                    .setDescription(`مرحباً بك <@${member.id}> في الدعم الفني الخاص بك.\nالرجاء طرح تفاصيل مشكلتك هنا بوضوح لكي يقوم المشرفون بالرد عليك في أقرب وقت ممكن.`)
+                    .setColor(0x00FF00);
+
+                const closeRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('close_ticket_btn').setLabel('إغلاق التذكرة والأرشفة 🔒').setStyle(ButtonStyle.Danger)
+                );
+
+                await ticketChannel.send({ embeds: [embed], components: [closeRow] });
+                await interaction.followUp({ content: `✅ تم إنشاء تذكرتك بنجاح: ${ticketChannel}`, ephemeral: true });
+
+                const logEmbed = new EmbedBuilder()
+                    .setTitle('🟢 تذكرة جديدة تم فتحها')
+                    .setDescription(`صاحب التذكرة: <@${member.id}> (${member.id})\nاسم القناة: ${ticketChannel}`)
+                    .setColor(0x2ECC71).setTimestamp();
+                await sendLog(guild, logEmbed);
+
+            } catch (e) { 
+                console.error(e);
+                await interaction.followUp({ content: '❌ حدث خطأ غير متوقع أثناء إعداد وتفعيل روم التذكرة.', ephemeral: true });
+            }
+        }
+
+        if (customId === 'close_ticket_btn') {
+            await interaction.reply({ content: '⏳ سيتم إغلاق وحذف روم التذكرة وتدوين السجل التفاعلي خلال 5 ثوانٍ...' });
+            
+            const logEmbed = new EmbedBuilder()
+                .setTitle('🔴 تذكرة تم إغلاقها وحذفها')
+                .setDescription(`المسؤول المعني بالإغلاق: <@${member.id}> (${member.id})\nاسم روم التذكرة: \`${channel.name}\``)
+                .setColor(0xE74C3C).setTimestamp();
+            await sendLog(guild, logEmbed);
+
+            setTimeout(() => channel.delete().catch(() => {}), 5000);
+        }
+    }
+
+    if (interaction.isChatInputCommand()) {
+        const { commandName, options, guild, member, channel } = interaction;
+
+        if (commandName === 'ban') {
+            if (!member.permissions.has(PermissionFlagsBits.BanMembers)) {
+                return interaction.reply({ content: '❌ لا تملك صلاحية حظر الأعضاء.', ephemeral: true });
+            }
+            const target = options.getMember('member');
+            const reason = options.getString('reason') || 'لا يوجد سبب';
+            if (!target) return interaction.reply({ content: '❌ لم يتم العثور على هذا العضو.', ephemeral: true });
+            try {
+                await target.ban({ reason });
+                await interaction.reply({ content: `✅ تم حظر ${target} بنجاح. السبب: ${reason}` });
+                
+                const logEmbed = new EmbedBuilder().setTitle('🔨 حظر عضو جديد').setDescription(`العضو المحظور: ${target} (${target.id})\nبواسطة: <@${member.id}>\nالسبب: ${reason}`).setColor(0xE74C3C).setTimestamp();
+                await sendLog(guild, logEmbed);
+            } catch (e) { await interaction.reply({ content: `❌ فشل الحظر: ${e.message}`, ephemeral: true }); }
+        }
+
+        if (commandName === 'timeout') {
+            if (!member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+                return interaction.reply({ content: '❌ لا تملك صلاحية كتم الأعضاء.', ephemeral: true });
+            }
+            const target = options.getMember('member');
+            const minutes = options.getInteger('minutes');
+            const reason = options.getString('reason') || 'لا يوجد سبب';
+            if (!target) return interaction.reply({ content: '❌ لم يتم العثور على هذا العضو.', ephemeral: true });
+            try {
+                const duration = minutes * 60 * 1000;
+                await target.timeout(duration, reason);
+                await interaction.reply({ content: `✅ تم كتم العضو ${target} بنجاح لـ ${minutes} دقيقة.` });
+
+                const logEmbed = new EmbedBuilder().setTitle('🔇 كتم عضو (Timeout)').setDescription(`العضو المكتوم: ${target}\nالمدة بالدقائق: ${minutes}\nبواسطة: <@${member.id}>`).setColor(0xfbbf24).setTimestamp();
+                await sendLog(guild, logEmbed);
+            } catch (e) { await interaction.reply({ content: `❌ فشل الكتم: ${e.message}`, ephemeral: true }); }
+        }
+
+        if (commandName === 'setup_tickets') {
+            if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+                return interaction.reply({ content: '❌ هذا الأمر مخصص للإداريين فقط!', ephemeral: true });
+            }
+
+            const embed = new EmbedBuilder()
+                .setTitle('تذكرة الدعم الفني والمساعدة 🎫')
+                .setDescription('إذا كنت تواجه مشكلة، ترغب بتقديم شكوى أو التحدث للإدارة، اضغط على الزر بالأسفل لفتح تذكرة خاصة بك.')
+                .setColor(0x3b82f6);
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('open_ticket_btn').setLabel('فتح تذكرة 🎫').setStyle(ButtonStyle.Success)
+            );
+
+            try {
+                await channel.send({ embeds: [embed], components: [row] });
+                await interaction.reply({ content: '✅ تم إرسال لوحة التذاكر التفاعلية بنجاح!', ephemeral: true });
+            } catch (e) { await interaction.reply({ content: `❌ فشل إرسال اللوحة: ${e.message}`, ephemeral: true }); }
+        }
+
+        if (commandName === 'game_wordle') {
+            const Game = new Wordle({
+                message: interaction,
+                isSlashGame: true,
+                embed: { title: 'لعبة تخمين الكلمات Wordle 📝', color: '#5865F2' },
+                customWord: null,
+                timeoutTime: 60000,
+                winMessage: '🎉 تهانينا! لقد نجحت بتخمين الكلمة الصحيحة وهي **{word}** بنجاح!',
+                loseMessage: '❌ للأسف! لم تنجح بالتخمين، الكلمة الصحيحة هي: **{word}**',
+                playerOnlyMessage: 'هذا الزر مخصص فقط لـ {player} للعب.'
+            });
+            Game.startGame();
+        }
+
+        if (commandName === 'game_tictactoe') {
+            const opponent = options.getUser('opponent');
+            if (opponent.id === interaction.user.id) return interaction.reply({ content: '❌ لا يمكنك اللعب ضد نفسك!', ephemeral: true });
+            if (opponent.bot) return interaction.reply({ content: '❌ لا يمكنك اللعب ضد البوتات!', ephemeral: true });
+
+            const Game = new TicTacToe({
+                message: interaction,
+                isSlashGame: true,
+                opponent: opponent,
+                embed: { title: 'لعبة إكس أو | Tic Tac Toe 🎮', color: '#5865F2' },
+                emojis: { xButton: '❌', oButton: '🔵', blankButton: '➖' },
+                mentionUser: true,
+                timeoutTime: 60000,
+                xMessage: '🎉 مبارك الفوز لـ {player} (❌)!',
+                oMessage: '🎉 مبارك الفوز لـ {player} (🔵)!',
+                drawMessage: '⚔️ انتهت المباراة بالتعادل بين الطرفين!',
+                requestDelay: 5000,
+                askMessage: 'مرحباً {opponent}، هل تقبل تحدي {player} في مباراة إكس أو تفاعلية؟',
+                rejectMessage: '❌ رفض الطرف الآخر التحدي المقترح من قبلك.',
+                timeoutMessage: '❌ انتهى الوقت المحدد للاستجابة للمباراة.',
+                playerOnlyMessage: 'هذا التفاعل مخصص فقط لـ {player} و {opponent}.'
+            });
+            Game.startGame();
+        }
+
+        if (commandName === 'game_snake') {
+            const Game = new Snake({
+                message: interaction,
+                isSlashGame: true,
+                embed: { title: 'لعبة الثعبان التفاعلية الكلاسيكية 🐍', overTitle: 'انتهت اللعبة! 💀', color: '#5865F2' },
+                emojis: { board: '⬛', food: '🍎', up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️' },
+                stopButton: 'إيقاف اللعبة 🛑',
+                timeoutTime: 60000,
+                snake: { head: '🟢', body: '🟩', tail: '🟢', over: '💀' },
+                foods: ['🍎', '🍇', '🍊', '🍓'],
+                playerOnlyMessage: 'أزرار اللعب مخصصة فقط لـ {player}.'
+            });
+            Game.startGame();
+        }
+    }
+});
+
+const startDashboard = require('./server.js');
+startDashboard(client, getGuildConfig, saveGuildConfig);
+
+const TOKEN = process.env.DISCORD_TOKEN || 'your_token_here';
+client.login(TOKEN);
