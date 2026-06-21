@@ -1,7 +1,48 @@
-[
-  {
-    "filename": "server.js",
-    "description": "هذا هو ملف لوحة التحكم (server.js) كاملاً ونقياً لنسخه مباشرة دون أي نصوص إضافية داخل الكود لتفادي مشاكل الحظر أو التوقف على Render.",
-    "content": "const express = require('express');\nconst session = require('express-session');\nconst bodyParser = require('body-parser');\nconst app = express();\nconst PORT = process.env.PORT || 3000;\n\napp.use(bodyParser.urlencoded({ extended: true }));\napp.use(session({\n    secret: 'elite-system-key-8493',\n    resave: false,\n    saveUninitialized: true,\n    cookie: { secure: false }\n}));\n\nconst ADMIN_PASSWORD = process.env.DASHBOARD_PASSWORD || 'admin123';\n\nfunction startDashboard(client, getGuildConfig, saveGuildConfig) {\n    app.get('/', (req, res) => {\n        if (req.session.loggedIn) return res.redirect('/dashboard');\n        res.send(`\n            <!DOCTYPE html>\n            <html lang=\"ar\" dir=\"rtl\">\n            <head>\n                <meta charset=\"UTF-8\">\n                <title>بوابة التحكم التفاعلية | تسجيل الدخول</title>\n                <script src=\"https://cdn.tailwindcss.com\"></script>\n            </head>\n            <body class=\"bg-slate-950 text-white flex items-center justify-center min-h-screen\">\n                <div class=\"bg-slate-900 p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-800\">\n                    <h1 class=\"text-2xl font-bold text-center text-indigo-400 mb-6\">بوابة إدارة البوت التفاعلي 🤖</h1>\n                    <form action=\"/login\" method=\"POST\" class=\"space-y-4\">\n                        <input type=\"password\" name=\"password\" placeholder=\"رمز المرور السري\" class=\"w-full p-3 rounded bg-slate-800 border border-slate-700 text-center text-white focus:outline-none focus:border-indigo-500\" required>\n                        <button type=\"submit\" class=\"w-full bg-indigo-600 hover:bg-indigo-700 p-3 rounded font-bold transition\">تسجيل الدخول</button>\n                    </form>\n                </div>\n            </body>\n            </html>\n        `);\n    });\n\n    app.post('/login', (req, res) => {\n        if (req.body.password === ADMIN_PASSWORD) {\n            req.session.loggedIn = true;\n            res.redirect('/dashboard');\n        } else {\n            res.send('<script>alert(\"المعلومات المدخلة خاطئة!\"); window.location=\"/\";</script>');\n        }\n    });\n\n    app.get('/dashboard', (req, res) => {\n        if (!req.session.loggedIn) return res.redirect('/');\n        const totalGuilds = client.guilds.cache.size;\n        const totalMembers = client.guilds.cache.reduce((acc, g) => acc + g.memberCount, 0);\n        let options = '';\n        client.guilds.cache.forEach(g => { options += `<option value=\"${g.id}\">${g.name}</option>`; });\n\n        res.send(`\n            <!DOCTYPE html>\n            <html lang=\"ar\" dir=\"rtl\">\n            <head>\n                <meta charset=\"UTF-8\">\n                <title>لوحة التحكم الفنية الموحدة</title>\n                <script src=\"https://cdn.tailwindcss.com\"></script>\n            </head>\n            <body class=\"bg-slate-950 text-slate-100 min-h-screen flex flex-col\">\n                <header class=\"bg-slate-900 p-4 border-b border-slate-800 flex justify-between px-6\">\n                    <h1 class=\"text-xl font-bold text-indigo-400\">لوحة إدارة الأنظمة والألعاب | ProBot Style 🔮</h1>\n                    <a href=\"/logout\" class=\"bg-rose-600 px-4 py-2 rounded font-bold text-sm\">خروج</a>\n                </header>\n                <main class=\"p-6 max-w-4xl w-full mx-auto space-y-6\">\n                    <div class=\"grid grid-cols-2 md:grid-cols-4 gap-4\">\n                        <div class=\"bg-slate-900 p-4 rounded border border-slate-800 flex flex-col items-center justify-center\">\n                            <img src=\"https://i.imgur.com/G5yZlV1.png\" class=\"w-12 h-12 object-contain mb-2\" alt=\"Add Icon\">\n                            <span class=\"text-xs text-slate-400\">تخصيص الإعدادات</span>\n                        </div>\n                        <div class=\"bg-slate-900 p-4 rounded border border-slate-800 flex flex-col items-center justify-center\">\n                            <img src=\"https://i.imgur.com/0iKj4vV.png\" class=\"w-12 h-12 object-contain mb-2\" alt=\"Cart Icon\">\n                            <span class=\"text-xs text-slate-400\">متجر الإضافات</span>\n                        </div>\n                        <div class=\"bg-slate-900 p-4 rounded border border-slate-800 flex flex-col items-center justify-center\">\n                            <img src=\"https://i.imgur.com/KjEaQO6.png\" class=\"w-12 h-12 object-contain mb-2\" alt=\"Ticket Icon\">\n                            <span class=\"text-xs text-slate-400\">إدارة التذاكر</span>\n                        </div>\n                        <div class=\"bg-slate-900 p-4 rounded border border-slate-800 flex flex-col items-center justify-center\">\n                            <img src=\"https://i.imgur.com/tFv0p1O.png\" class=\"w-12 h-12 object-contain mb-2\" alt=\"Link Icon\">\n                            <span class=\"text-xs text-slate-400\">روابط الاتصال</span>\n                        </div>\n                    </div>\n                    <div class=\"grid grid-cols-1 md:grid-cols-3 gap-6\">\n                        <div class=\"bg-slate-900 p-6 rounded border border-slate-800\"><h3>الخوادم المتصلة</h3><p class=\"text-3xl font-bold text-indigo-400\">\${totalGuilds}</p></div>\n                        <div class=\"bg-slate-900 p-6 rounded border border-slate-800\"><h3>الأعضاء النشطون</h3><p class=\"text-3xl font-bold text-emerald-400\">\${totalMembers}</p></div>\n                        <div class=\"bg-slate-900 p-6 rounded border border-slate-800\"><h3>الاستجابة</h3><p class=\"text-3xl font-bold text-amber-400\">\${client.ws.ping} ms</p></div>\n                    </div>\n                    <div class=\"bg-slate-900 p-6 rounded border border-slate-800 space-y-4\">\n                        <h2 class=\"text-lg font-bold text-indigo-400\">⚙️ إعدادات الرومات والتذاكر للشبكة</h2>\n                        <form action=\"/save-config\" method=\"POST\" class=\"space-y-4\">\n                            <select name=\"guildId\" class=\"w-full p-3 rounded bg-slate-800 border border-slate-700 text-white\">\${options}</select>\n                            <input type=\"text\" name=\"ticketCategoryId\" placeholder=\"آي دي (ID) كاتيجوري التذاكر\" class=\"w-full p-3 rounded bg-slate-800 border border-slate-700 text-white\">\n                            <input type=\"text\" name=\"logsChannelId\" placeholder=\"آي دي (ID) روم سجلات الإجراءات\" class=\"w-full p-3 rounded bg-slate-800 border border-slate-700 text-white\">\n                            <button type=\"submit\" class=\"w-full bg-indigo-600 p-3 rounded font-bold text-white\">حفظ الإعدادات الفنية</button>\n                        </form>\n                    </div>\n                </main>\n            </body>\n            </html>\n        `);\n    });\n\n    app.post('/save-config', async (req, res) => {\n        if (!req.session.loggedIn) return res.redirect('/');\n        const { guildId, ticketCategoryId, logsChannelId } = req.body;\n        try {\n            const config = await getGuildConfig(guildId);\n            if (ticketCategoryId) config.ticketCategoryId = ticketCategoryId;\n            if (logsChannelId) config.logsChannelId = logsChannelId;\n            await saveGuildConfig(guildId, config);\n            res.send('<script>alert(\"تم تحديث إعدادات السيرفر وحفظها تلقائياً!\"); window.location=\"/dashboard\";</script>');\n        } catch (e) {\n            res.send('<script>alert(\"حدث خطأ أثناء الاتصال وحفظ البيانات!\"); window.location=\"/dashboard\";</script>');\n        }\n    });\n\n    app.get('/logout', (req, res) => {\n        req.session.destroy();\n        res.redirect('/');\n    });\n\n    app.listen(PORT, () => console.log(`[Web] ProBot Dashboard active 24/7 on port \${PORT}`));\n}\n\nmodule.exports = startDashboard;"
-  }
-]
+const express = require('express');
+const mongoose = require('mongoose');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// 1. الاتصال بقاعدة بيانات MongoDB Atlas
+mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log('تم الاتصال بقاعدة بيانات MongoDB بنجاح.'))
+    .catch(err => console.error('خطأ في الاتصال بقاعدة البيانات:', err));
+
+// 2. تشغيل ملف البوت (index.js) ليعمل مع السيرفر تلقائياً
+require('./index.js');
+
+app.use(express.json());
+
+// 3. صفحة الداشبورد الرئيسية (مظهر بسيط جداً لتأكيد عمل البوت)
+app.get('/', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="ar" dir="rtl">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>لوحة تحكم البوت</title>
+            <style>
+                body { font-family: system-ui, -apple-system, sans-serif; background-color: #2c2f33; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                .card { text-align: center; background-color: #23272a; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); max-width: 400px; width: 90%; }
+                h1 { color: #5865F2; margin-bottom: 10px; font-size: 24px; }
+                p { color: #b9bbbe; font-size: 16px; margin-bottom: 20px; }
+                .status { display: inline-block; padding: 8px 20px; background-color: #43b581; color: white; border-radius: 20px; font-weight: bold; font-size: 14px; }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h1>لوحة تحكم البوت</h1>
+                <p>البوت متصل بقاعدة البيانات ويعمل الآن بنجاح على منصة Render.</p>
+                <div class="status">متصل (Online)</div>
+            </div>
+        </body>
+        </html>
+    `);
+});
+
+// 4. تشغيل السيرفر على المنفذ المطلوب
+app.listen(PORT, () => {
+    console.log(`السيرفر يعمل الآن على المنفذ: ${PORT}`);
+});
