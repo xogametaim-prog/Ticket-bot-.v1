@@ -1,4 +1,13 @@
+{
+  "name": "from-trl-team",
+  "version": "1.0.0",
+  "description": "FROM TRL TEAM™ Discord Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "discord.js": "^14.14.1",
     "express": "^4.19.2"
   }
+}
