@@ -1,5 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const config = require('./config.json');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 // إنشاء عميل البوت مع تحديد الـ Intents المطلوبة
 const client = new Client({
@@ -13,8 +12,7 @@ const client = new Client({
 client.once('ready', async () => {
     console.log(`✅ تم تشغيل البوت بنجاح باسم: ${client.user.tag}`);
 
-    // تسجيل أمر /help كـ Slash Command في السيرفر (Global)
-    // ملاحظة: قد يستغرق التحديث العالمي بضع دقائق لليوزرز
+    // تسجيل أمر /help كـ Slash Command
     try {
         await client.application.commands.create({
             name: 'help',
@@ -26,11 +24,11 @@ client.once('ready', async () => {
     }
 });
 
-// منع البوت من الرد على نفسه في الشات العادي
+// منع البوت من الرد على نفسه في الشات
 client.on('messageCreate', async (message) => {
-    if (message.author.bot) return; // إذا كان كاتب الرسالة بوت (حتى لو هو نفسه)، يتجاهلها تماماً
+    if (message.author.bot) return; // يتجاهل الرسالة تماماً إذا كان الكاتب بوت
 
-    // مثال بسيط للتأكد من عمل الشات:
+    // مثال بسيط للتأكد من عمل الشات
     if (message.content === 'هلا') {
         message.reply('هلا بك! كيف بقدر أساعدك اليوم؟');
     }
@@ -97,5 +95,5 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// تشغيل البوت باستخدام التوكن من ملف الـ config
-client.login(config.token);
+// تشغيل البوت باستخدام التوكن المرفوع كـ Variable على منصة Render
+client.login(process.env.DISCORD_TOKEN);
