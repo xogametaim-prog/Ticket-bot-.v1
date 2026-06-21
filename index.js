@@ -1,6 +1,20 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const express = require('express'); // استيراد مكتبة إكسبريس لإنشاء السيرفر الوهمي
 
-// إنشاء عميل البوت مع تحديد الـ Intents المطلوبة
+// ---------------- [ الخدعة لـ Render و UptimeRobot ] ----------------
+const app = express();
+const PORT = process.env.PORT || 3000; // ريندر بيعطي البوت بورت تلقائي
+
+app.get('/', (req, res) => {
+    res.send('FROM TRL TEAM™ Bot is Online and Running 24/7! 🚀');
+});
+
+app.listen(PORT, () => {
+    console.log(`🌐 السيرفر الوهمي يعمل الآن على المنفذ: ${PORT}`);
+});
+// ------------------------------------------------------------------
+
+// إنشاء عميل البوت
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -26,9 +40,8 @@ client.once('ready', async () => {
 
 // منع البوت من الرد على نفسه في الشات
 client.on('messageCreate', async (message) => {
-    if (message.author.bot) return; // يتجاهل الرسالة تماماً إذا كان الكاتب بوت
+    if (message.author.bot) return;
 
-    // مثال بسيط للتأكد من عمل الشات
     if (message.content === 'هلا') {
         message.reply('هلا بك! كيف بقدر أساعدك اليوم؟');
     }
@@ -36,17 +49,14 @@ client.on('messageCreate', async (message) => {
 
 // التعامل مع الـ Slash Commands والتفاعل مع الأزرار
 client.on('interactionCreate', async (interaction) => {
-    // 1. التعامل مع أمر /help
     if (interaction.isChatInputCommand()) {
         if (interaction.commandName === 'help') {
             
-            // إنشاء الـ Embed الرئيسي
             const helpEmbed = new EmbedBuilder()
                 .setColor('#5865F2')
                 .setTitle('📚 قائمة المساعدة للقروب')
                 .setDescription('مرحباً بك! يرجى اختيار القسم الذي تريد استعراضه من خلال الأزرار أدناه:');
 
-            // إنشاء الأزرار
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('help_owner')
@@ -62,9 +72,7 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // 2. التعامل مع ضغطات الأزرار (Buttons)
     if (interaction.isButton()) {
-        // زر أوامر الأونر
         if (interaction.customId === 'help_owner') {
             const ownerEmbed = new EmbedBuilder()
                 .setColor('#ED4245')
@@ -78,7 +86,6 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.update({ embeds: [ownerEmbed] });
         }
 
-        // زر الأوامر العامة
         if (interaction.customId === 'help_public') {
             const publicEmbed = new EmbedBuilder()
                 .setColor('#57F287')
@@ -95,5 +102,5 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// تشغيل البوت باستخدام التوكن المرفوع كـ Variable على منصة Render
+// تشغيل البوت
 client.login(process.env.DISCORD_TOKEN);
