@@ -1,118 +1,101 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
+const config = require('./config.json');
 
-// إنشاء الكلاينت مع الصلاحيات الأساسية
-const client = new Client({ 
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] 
+// إنشاء عميل البوت مع تحديد الـ Intents المطلوبة
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ]
 });
 
-// تعريف أوامر الـ Slash
-const commands = [
-    new SlashCommandBuilder()
-        .setName('game')
-        .setDescription('لعبة رمي العملة (ملك أم كتابة)'),
-    
-    new SlashCommandBuilder()
-        .setName('color')
-        .setDescription('تغيير لون اسمك باستخدام كود Hex')
-        .addStringOption(option => 
-            option.setName('hex')
-                .setDescription('كود اللون (مثال: #ff0000)')
-                .setRequired(true)),
-    
-    new SlashCommandBuilder()
-        .setName('ban')
-        .setDescription('حظر عضو من السيرفر')
-        .addUserOption(option => 
-            option.setName('user')
-                .setDescription('العضو المراد حظره')
-                .setRequired(true))
-        .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
-];
-
-// تسجيل الأوامر تلقائياً عند تشغيل البوت
 client.once('ready', async () => {
-    console.log(`تم تشغيل البوت: ${client.user.tag}`);
-    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+    console.log(`✅ تم تشغيل البوت بنجاح باسم: ${client.user.tag}`);
+
+    // تسجيل أمر /help كـ Slash Command في السيرفر (Global)
+    // ملاحظة: قد يستغرق التحديث العالمي بضع دقائق لليوزرز
     try {
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('تم تسجيل أوامر الـ Slash بنجاح.');
+        await client.application.commands.create({
+            name: 'help',
+            description: 'عرض قائمة الأوامر المتاحة',
+        });
+        console.log('🔹 تم تسجيل أمر /help بنجاح!');
     } catch (error) {
-        console.error('خطأ في تسجيل الأوامر:', error);
+        console.error('خطأ أثناء تسجيل الأمر:', error);
     }
 });
 
-// معالجة الأوامر التفاعلية
+// منع البوت من الرد على نفسه في الشات العادي
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return; // إذا كان كاتب الرسالة بوت (حتى لو هو نفسه)، يتجاهلها تماماً
+
+    // مثال بسيط للتأكد من عمل الشات:
+    if (message.content === 'هلا') {
+        message.reply('هلا بك! كيف بقدر أساعدك اليوم؟');
+    }
+});
+
+// التعامل مع الـ Slash Commands والتفاعل مع الأزرار
 client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
+    // 1. التعامل مع أمر /help
+    if (interaction.isChatInputCommand()) {
+        if (interaction.commandName === 'help') {
+            
+            // إنشاء الـ Embed الرئيسي
+            const helpEmbed = new EmbedBuilder()
+                .setColor('#5865F2')
+                .setTitle('📚 قائمة المساعدة للقروب')
+                .setDescription('مرحباً بك! يرجى اختيار القسم الذي تريد استعراضه من خلال الأزرار أدناه:');
 
-    const { commandName, options } = interaction;
+            // إنشاء الأزرار
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('help_owner')
+                    .setLabel('👑 أوامر الأونر')
+                    .setStyle(ButtonStyle.Danger),
+                new ButtonBuilder()
+                    .setCustomId('help_public')
+                    .setLabel('👥 الأوامر العامة (للجميع)')
+                    .setStyle(ButtonStyle.Primary)
+            );
 
-    // 1. أمر اللعبة (Game)
-    if (commandName === 'game') {
-        const choices = ['🪙 ملك (Heads)', '🪙 كتابة (Tails)'];
-        const result = choices[Math.floor(Math.random() * choices.length)];
-        return interaction.reply(`النتيجة هي: **${result}**`);
-    }
-
-    // 2. أمر الألوان (Color)
-    if (commandName === 'color') {
-        const hex = options.getString('hex');
-        
-        // التحقق من صحة كود اللون المدخل
-        if (!hex.startsWith('#') || hex.length !== 7) {
-            return interaction.reply({ content: 'الرجاء إدخال كود لون صحيح يبدأ بـ #. مثال: `#ff0000`', ephemeral: true });
-        }
-
-        await interaction.deferReply();
-
-        try {
-            // البحث عن الرتبة أو إنشاؤها إن لم تكن موجودة
-            let role = interaction.guild.roles.cache.find(r => r.name === `color-${hex}`);
-            if (!role) {
-                role = await interaction.guild.roles.create({
-                    name: `color-${hex}`,
-                    color: hex,
-                    reason: 'تخصيص لون الاسم من البوت'
-                });
-            }
-
-            // إزالة رتب الألوان القديمة التي تبدأ بـ "color-" لتفادي تراكم الرتب على المستخدم
-            const oldColorRoles = interaction.member.roles.cache.filter(r => r.name.startsWith('color-'));
-            for (const [id, r] of oldColorRoles) {
-                await interaction.member.roles.remove(r);
-            }
-
-            // إعطاء الرتبة الجديدة للعضو
-            await interaction.member.roles.add(role);
-            return interaction.editReply(`تم تغيير لون اسمك إلى **${hex}** بنجاح!`);
-        } catch (err) {
-            console.error(err);
-            return interaction.editReply('حدث خطأ أثناء محاولة تعديل اللون. يرجى التأكد من أن رتبة البوت أعلى من رتب الألوان في قائمة الرتب.');
+            await interaction.reply({ embeds: [helpEmbed], components: [row], ephemeral: true });
         }
     }
 
-    // 3. أمر البان (Ban)
-    if (commandName === 'ban') {
-        const user = options.getUser('user');
-        const member = interaction.guild.members.cache.get(user.id);
+    // 2. التعامل مع ضغطات الأزرار (Buttons)
+    if (interaction.isButton()) {
+        // زر أوامر الأونر
+        if (interaction.customId === 'help_owner') {
+            const ownerEmbed = new EmbedBuilder()
+                .setColor('#ED4245')
+                .setTitle('👑 صلاحيات وأوامر الأونر (المطور)')
+                .setDescription('هذه الأوامر مخصصة فقط لإدارة البوت والسيرفر بشكل كامل:')
+                .addFields(
+                    { name: '• إعدادات البوت', value: 'التحكم بالباند، التيكتات، وتعديل الخصائص.' },
+                    { name: '• الصيانة', value: 'إعادة تشغيل البوت أو تحديث الملفات.' }
+                );
 
-        if (!member) {
-            return interaction.reply({ content: 'العضو غير موجود في هذا السيرفر.', ephemeral: true });
+            await interaction.update({ embeds: [ownerEmbed] });
         }
 
-        if (!member.bannable) {
-            return interaction.reply({ content: 'لا يمكنني حظر هذا العضو، رتبته أعلى مني أو لا أملك الصلاحيات الكافية.', ephemeral: true });
-        }
+        // زر الأوامر العامة
+        if (interaction.customId === 'help_public') {
+            const publicEmbed = new EmbedBuilder()
+                .setColor('#57F287')
+                .setTitle('👥 الأوامر العامة (للجميع)')
+                .setDescription('هذه الأوامر متاحة لجميع أعضاء السيرفر بدون استثناء:')
+                .addFields(
+                    { name: '• الألعاب', value: 'لعب الالعاب الفردية أو الجماعية داخل السيرفر.' },
+                    { name: '• نظام اللفل', value: 'التحقق من مستواك وخبرتك الحاليين.' },
+                    { name: '• معلومات', value: 'عرض معلومات الحساب أو السيرفر.' }
+                );
 
-        try {
-            await member.ban({ reason: `تم الحظر بواسطة ${interaction.user.tag}` });
-            return interaction.reply(`تم حظر العضو **${user.tag}** بنجاح.`);
-        } catch (err) {
-            console.error(err);
-            return interaction.reply({ content: 'فشل حظر العضو بسبب خطأ داخلي.', ephemeral: true });
+            await interaction.update({ embeds: [publicEmbed] });
         }
     }
 });
 
-// تسجيل الدخول عبر توكن البوت المخزن في متغيرات البيئة
-client.login(process.env.DISCORD_TOKEN);
+// تشغيل البوت باستخدام التوكن من ملف الـ config
+client.login(config.token);
