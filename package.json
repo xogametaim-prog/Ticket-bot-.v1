@@ -1,7 +1,7 @@
 {
   "name": "trl-system-bot",
   "version": "1.0.0",
-  "description": "Ticket and Embed Bot by TRL.dev",
+  "description": "Premium Ticket and Embed Bot by TRL.dev",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
