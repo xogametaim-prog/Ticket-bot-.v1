@@ -1,15 +1,13 @@
 {
-  "name": "trl-system-bot",
+  "name": "zone-ticket-bot",
   "version": "1.0.0",
-  "description": "Premium Ticket and Embed Bot by TRL.dev",
+  "description": "Premium Ticket and Embed Bot for Discord",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "register": "node deploy-commands.js"
   },
   "dependencies": {
-    "discord.js": "^14.15.3"
-  },
-  "engines": {
-    "node": ">=16.11.0"
+    "discord.js": "^14.14.1"
   }
 }
