@@ -11,7 +11,7 @@ const {
     ChannelType,
     REST,
     Routes,
-    MessageFlags // تم استيرادها لحل مشكلة التحذير والبطء
+    MessageFlags
 } = require('discord.js');
 const express = require('express');
 
@@ -28,7 +28,10 @@ const client = new Client({
     ]
 });
 
-const PREFIX = '-st'; 
+const TICKET_PREFIX = '-st'; 
+const EMBED_PREFIX = '-em';  
+
+const embedSetup = new Map();
 
 // ==================== إعدادات نظام التذاكر المطور والمستقر ====================
 const TICKET_CONFIG = {
@@ -131,11 +134,25 @@ async function sendTicketSetup(channel) {
     await channel.send({ embeds: [embed], components: [row] });
 }
 
-// 1. تشغيل البوكس عبر الاختصار السريع -st أو أوامر السلاش
+// دالة بدء الإعداد التفاعلي للإمبد المخصص مع الأزرار
+async function startEmbedSetup(channel, user) {
+    const member = channel.guild.members.cache.get(user.id);
+    if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return channel.send('❌ عذراً، هذا الأمر مخصص للإداريين فقط.');
+    }
+
+    const embedState = { step: 1, title: null, description: null, buttonLabel: null };
+    embedSetup.set(user.id, embedState);
+
+    await channel.send(`${user}, 📝 **بدء إعداد إمبد مخصص**\n\n**الخطوة [1/3]:** يرجى كتابة **عنوان (Title)** الإمبد:`);
+}
+
+// التعامل مع الاختصارات والأوامر في الشات
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
-    if (message.content.trim() === PREFIX) {
+    // الاختصار -st لبوكس التذاكر
+    if (message.content.trim() === TICKET_PREFIX) {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return message.reply('❌ عذراً، هذا الأمر مخصص للإداريين فقط.');
         }
@@ -144,6 +161,58 @@ client.on('messageCreate', async message => {
             await message.delete().catch(() => {});
         } catch (err) {
             console.error(err);
+        }
+        return;
+    }
+
+    // الاختصار -em للإمبد المخصص
+    if (message.content.trim() === EMBED_PREFIX) {
+        try {
+            await startEmbedSetup(message.channel, message.author);
+            await message.delete().catch(() => {});
+        } catch (err) {
+            console.error(err);
+        }
+        return;
+    }
+
+    // تتبع خطوات إعداد الإمبد المخصص -em
+    if (embedSetup.has(message.author.id)) {
+        const state = embedSetup.get(message.author.id);
+
+        if (state.step === 1) {
+            state.title = message.content.trim();
+            state.step = 2;
+            return message.reply(`✅ تم حفظ العنوان.\n\n**الخطوة [2/3]:** يرجى كتابة **وصف (Description)** الإمبد:`);
+        }
+
+        if (state.step === 2) {
+            state.description = message.content.trim();
+            state.step = 3;
+            return message.reply(`✅ تم حفظ الوصف.\n\n**الخطوة [3/3] الأخيرة:** يرجى كتابة **النص المكتوب على الزر** (مثال: فتح تذكرة، اضغط هنا...):`);
+        }
+
+        if (state.step === 3) {
+            state.buttonLabel = message.content.trim();
+
+            const customEmbed = new EmbedBuilder()
+                .setTitle(state.title)
+                .setDescription(state.description)
+                .setColor('#5865F2');
+
+            const customButton = new ButtonBuilder()
+                .setCustomId('general_embed_button_action')
+                .setLabel(state.buttonLabel)
+                .setStyle(ButtonStyle.Primary)
+                .setEmoji('🎫');
+
+            const row = new ActionRowBuilder().addComponents(customButton);
+
+            await message.channel.send({ embeds: [customEmbed], components: [row] });
+            await message.reply('🎉 **تم إنشاء الإمبد المخصص مع الأزرار بنجاح!**');
+
+            embedSetup.delete(message.author.id);
+            return;
         }
     }
 
@@ -208,7 +277,6 @@ client.on('interactionCreate', async interaction => {
                     permissionOverwrites: permissionOverwrites
                 });
 
-                // حفظ أيدي صاحب التكت في توبك القناة
                 await channel.setTopic(`creator_id:${member.id}`);
 
                 const welcomeEmbed = new EmbedBuilder()
@@ -269,7 +337,6 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({ content: '❌ لا يمكنك استلام هذه التذكرة لأنك لا تملك الرتبة المخصصة للتحكم فيها!', flags: MessageFlags.Ephemeral });
             }
 
-            // استجابة فورية لمنع الـ Lag
             await interaction.deferUpdate();
 
             const topic = interaction.channel.topic || '';
@@ -300,7 +367,7 @@ client.on('interactionCreate', async interaction => {
             await interaction.followUp({ content: `${creatorMention} **تم استلام تكت عن طريق هذا الإدارة: ${member}، تابع معه.**` });
         }
 
-        // زر إغلاق التذكرة
+        // زر إغلاق التذكرة المخصصة
         if (customId.startsWith('close_ticket_')) {
             const optionValue = customId.replace('close_ticket_', '');
             const selectedOption = TICKET_CONFIG.options.find(opt => opt.value === optionValue);
@@ -321,6 +388,53 @@ client.on('interactionCreate', async interaction => {
                     await interaction.channel.delete();
                 } catch (err) {
                     console.error('Error deleting channel:', err);
+                }
+            }, 5000);
+        }
+
+        // زر الإمبد المخصص العام
+        if (customId === 'general_embed_button_action') {
+            await interaction.reply({ content: 'سيتم فتح تذكرة عامة لك الآن...', flags: MessageFlags.Ephemeral });
+            const guild = interaction.guild;
+            const member = interaction.member;
+
+            try {
+                const channel = await guild.channels.create({
+                    name: `ticket-general-${member.user.username}`,
+                    type: ChannelType.GuildText,
+                    permissionOverwrites: [
+                        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                        { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+                    ]
+                });
+
+                await channel.setTopic(`creator_id:${member.id}`);
+
+                const embed = new EmbedBuilder()
+                    .setTitle('تذكرة عامة مفتوحة')
+                    .setDescription(`مرحباً بك ${member}، يرجى كتابة استفسارك هنا وسيجيبك الإشراف بأقرب وقت.`)
+                    .setColor('#5865F2');
+
+                const closeButton = new ButtonBuilder()
+                    .setCustomId('close_custom_ticket_general')
+                    .setLabel('إغلاق التذكرة')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('🔒');
+
+                const row = new ActionRowBuilder().addComponents(closeButton);
+                await channel.send({ content: `${member}`, embeds: [embed], components: [row] });
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        if (customId === 'close_custom_ticket_general') {
+            await interaction.reply({ content: '⚠️ سيتم حذف التذكرة نهائياً وإغلاق القناة خلال 5 ثوانٍ...' });
+            setTimeout(async () => {
+                try {
+                    await interaction.channel.delete();
+                } catch (err) {
+                    console.error(err);
                 }
             }, 5000);
         }
