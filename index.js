@@ -16,7 +16,7 @@ const express = require('express');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Ticket & Embed Bot Active!'));
+app.get('/', (req, res) => res.send('Multi-Ticket Bot Active!'));
 app.listen(PORT, '0.0.0.0', () => console.log(`Server connected to port ${PORT}`));
 
 const client = new Client({
@@ -27,7 +27,7 @@ const client = new Client({
     ]
 });
 
-const TICKET_PREFIX = '-st'; // لإنشاء بوكس تكت مخصص
+const TICKET_PREFIX = '-st'; // لإنشاء بوكس تكت متعدد ومخصص
 const EMBED_PREFIX = '-em';  // لإنشاء إمبد مخصص مع أزرار
 
 const tempSetup = new Map();
@@ -51,7 +51,7 @@ client.once('ready', async () => {
     }
 });
 
-// دالة بدء الإعداد التفاعلي لبوكس التكت المخصص
+// دالة بدء الإعداد التفاعلي لبوكس التكت المتعدد
 async function startInteractiveSetup(messageOrInteraction, channel, user) {
     const member = channel.guild.members.cache.get(user.id);
     if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
@@ -63,10 +63,18 @@ async function startInteractiveSetup(messageOrInteraction, channel, user) {
         }
     }
 
-    const setupState = { step: 1, roleId: null, boxTitle: null, imageUrl: null, categoryId: null };
+    // إعداد الهيكل الجديد لدعم خيارات متعددة في بوكس واحد
+    const setupState = { 
+        step: 'get_count', // الخطوة الأولى: معرفة عدد الأقسام
+        optionsCount: 0,
+        currentOptionIndex: 0,
+        options: [], // مصفوفة لتخزين الأقسام المخصصة
+        imageUrl: null,
+        categoryId: null
+    };
     tempSetup.set(user.id, setupState);
 
-    const welcomeMsg = `⚙️ **بدء إعداد بوكس تذاكر تفاعلي جديد**\n\n**الخطوة [1/4]:** يرجى كتابة (أيدي الرتبة - Role ID) التي تريدها أن تستلم وتتحكم في تذاكر هذا البوكس.`;
+    const welcomeMsg = `⚙️ **بدء إعداد بوكس تذاكر تفاعلي جديد ومتعدد الأقسام**\n\n**الخطوة [1]:** كم عدد الأقسام (الخيارات) التي تريد وضعها في هذا البوكس الموحد؟ (اكتب رقماً من **1 إلى 5**):`;
     if (messageOrInteraction.reply) {
         await messageOrInteraction.reply({ content: welcomeMsg, ephemeral: true });
     } else {
@@ -97,7 +105,7 @@ async function startEmbedSetup(messageOrInteraction, channel, user) {
     }
 }
 
-// قراءة الإجابات والتحكم في الرسائل
+// قراءة الإجابات والتحكم في الرسائل والخطوات التفاعلية المخصصة
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
@@ -115,7 +123,6 @@ client.on('messageCreate', async message => {
     if (message.content.trim().toLowerCase() === '!ping') {
         const topic = message.channel.topic || '';
         if (topic.includes('creator_id:')) {
-            // استخراج الأيدي بدقة من التوبك
             const creatorPart = topic.split('creator_id:')[1];
             const creatorId = creatorPart ? creatorPart.split(';')[0] : null;
             const member = message.guild.members.cache.get(creatorId);
@@ -125,39 +132,67 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 1. تتبع خطوات إعداد بوكس التكت المخصص
+    // 1. معالجة خطوات إعداد بوكس التكت المتعدد الذكي
     if (tempSetup.has(message.author.id)) {
         const state = tempSetup.get(message.author.id);
 
-        if (state.step === 1) {
+        // خطوة تحديد عدد الأقسام
+        if (state.step === 'get_count') {
+            const count = parseInt(message.content.trim());
+            if (isNaN(count) || count < 1 || count > 5) {
+                return message.reply('❌ يرجى كتابة رقم صحيح من 1 إلى 5 فقط:');
+            }
+            state.optionsCount = count;
+            state.currentOptionIndex = 0;
+            state.step = 'get_option_label';
+            return message.reply(`✅ تم تحديد عدد الأقسام: **${count}**\n\n💬 **الآن لنبدأ بتجهيز القسم رقم [1]**:\nيرجى كتابة **اسم القسم** (مثال: الدعم الفني، مبيعات... إلخ):`);
+        }
+
+        // خطوة الحصول على اسم القسم الحالي
+        if (state.step === 'get_option_label') {
+            const label = message.content.trim();
+            state.options.push({ label: label, roleId: null, value: `opt_${state.currentOptionIndex + 1}` });
+            state.step = 'get_option_role';
+            return message.reply(`✅ تم حفظ اسم القسم: **${label}**\n\n👤 يرجى كتابة **أيدي الرتبة (Role ID)** المسؤولة عن استلام تذاكر هذا القسم تحديداً:`);
+        }
+
+        // خطوة الحصول على رتبة القسم الحالي ومتابعة التكرار
+        if (state.step === 'get_option_role') {
             const roleId = message.content.trim();
             const role = message.guild.roles.cache.get(roleId);
             if (!role) {
-                return message.reply('❌ الأيدي غير صحيح أو لم يتم العثور على الرتبة. يرجى كتابة أيدي رتبة صحيح:');
+                return message.reply('❌ أيدي الرتبة غير صحيح. يرجى كتابة أيدي رتبة صحيح وموجود بالسيرفر:');
             }
-            state.roleId = roleId;
-            state.step = 2;
-            return message.reply(`✅ تم تحديد الرتبة: **${role.name}**\n\n**الخطوة [2/4]:** اكتب الآن الاسم الذي تريده أن يظهر داخل البوكس (مثال: الدعم الفني، المبيعات... إلخ):`);
+
+            // حفظ الرتبة للقسم الحالي
+            state.options[state.currentOptionIndex].roleId = roleId;
+            state.currentOptionIndex++;
+
+            // التحقق مما إذا كان هناك أقسام متبقية تحتاج إعداد
+            if (state.currentOptionIndex < state.optionsCount) {
+                state.step = 'get_option_label';
+                return message.reply(`✅ تم ربط الرتبة **${role.name}** بالقسم السابق.\n\n💬 **لننتقل الآن لتجهيز القسم رقم [${state.currentOptionIndex + 1}]**:\nيرجى كتابة **اسم القسم**:`);
+            } else {
+                // الانتقال للخطوات العامة للبوكس بعد انتهاء الأقسام
+                state.step = 'get_image';
+                return message.reply(`✅ تم الانتهاء من إعداد جميع الأقسام بنجاح!\n\n🖼️ يرجى وضع **رابط الصورة (Image URL)** للبوكس الرئيسي (إذا كنت لا تريد صورة اكتب: \`لا\`):`);
+            }
         }
 
-        if (state.step === 2) {
-            state.boxTitle = message.content.trim();
-            state.step = 3;
-            return message.reply(`✅ تم حفظ الاسم: **${state.boxTitle}**\n\n**الخطوة [3/4]:** ضع رابط الصورة (Image URL) للبوكس الرئيسي (إذا كنت لا تريد صورة اكتب: \`لا\`):`);
-        }
-
-        if (state.step === 3) {
+        // خطوة الحصول على الصورة العامة للبوكس
+        if (state.step === 'get_image') {
             const input = message.content.trim();
             if (input.toLowerCase() !== 'لا' && input.startsWith('http')) {
                 state.imageUrl = input;
             } else {
                 state.imageUrl = null;
             }
-            state.step = 4;
-            return message.reply(`✅ تم حفظ إعدادات الصورة.\n\n**الخطوة [4/4] الأخيرة:** يرجى كتابة أيدي القسم (Category ID) الذي تفتح فيه التذاكر (إذا كنت تريدها تفتح في أي مكان اكتب: \`لا\`):`);
+            state.step = 'get_category';
+            return message.reply(`✅ تم حفظ إعدادات الصورة.\n\n📂 يرجى كتابة **أيدي القسم (Category ID)** الذي تفتح فيه التذاكر (إذا كنت تريدها تفتح في أي مكان اكتب: \`لا\`):`);
         }
 
-        if (state.step === 4) {
+        // الخطوة الأخيرة: بناء البوكس المتعدد المستقل وإرساله
+        if (state.step === 'get_category') {
             const input = message.content.trim();
             if (input.toLowerCase() !== 'لا') {
                 state.categoryId = input;
@@ -166,30 +201,36 @@ client.on('messageCreate', async message => {
             }
 
             const embed = new EmbedBuilder()
-                .setTitle('الدعم الفني | Support Setup')
-                .setDescription(`يرجى اختيار القسم المخصص أدناه لفتح تذكرة مباشرة مع رتبة الدعم المخصصة.`)
+                .setTitle('الدعم الفني والخدمات | Support Portal')
+                .setDescription(`يرجى فتح القائمة أدناه واختيار القسم المناسب لمشكلتك، وسيتم تحويلك مباشرة للقسم المختص ومتابعتك مع المشرفين المسؤولين عن هذا القسم.`)
                 .setColor('#2b2d31');
 
             if (state.imageUrl) {
                 embed.setImage(state.imageUrl);
             }
 
-            // قمنا بتمرير الرتبة والقسم في customId ليكون كل بوكس مستقلاً بذاته
+            // تشفير خريطة الخيارات (الرتب والأقسام) داخل الـ Custom ID لتفادي التداخل نهائياً ولتسهيل المعالجة الفورية السريعة
+            // الهيكل: multi_t_menu_[رقم عشوائي لتفادي التكرار]
+            const uniqueId = Date.now().toString().slice(-4);
             const selectMenu = new StringSelectMenuBuilder()
-                .setCustomId(`custom_ticket_menu_${state.roleId}_${state.categoryId || 'none'}`)
-                .setPlaceholder('الرجاء اختيار قسم لفتح التذكرة...')
-                .addOptions(
+                .setCustomId(`multi_t_menu_${uniqueId}_${state.categoryId || 'none'}`)
+                .setPlaceholder('الرجاء اختيار قسم مناسب لفتح تذكرة...');
+
+            // إضافة جميع الأقسام التي قمت أنت بإعدادها ديناميكياً بداخل القائمة المنسدلة الواحدة
+            state.options.forEach(opt => {
+                selectMenu.addOptions(
                     new StringSelectMenuOptionBuilder()
-                        .setValue('open_custom_ticket')
-                        .setLabel(state.boxTitle)
-                        .setDescription(`اضغط لفتح تذكرة وسيستلمها أصحاب الرتبة المحددة`)
+                        .setValue(`opaction_${opt.roleId}`) // تخزين أيدي رتبة الاستلام بداخل قيمة الاختيار لسرعة الاتصال
+                        .setLabel(opt.label)
+                        .setDescription(`اضغط لفتح تذكرة بقسم ${opt.label}`)
                         .setEmoji('🎫')
                 );
+            });
 
             const row = new ActionRowBuilder().addComponents(selectMenu);
 
             await message.channel.send({ embeds: [embed], components: [row] });
-            await message.reply('🎉 **تم إنشاء وتخصيص البوكس بنجاح! يمكنك تكرار الأمر لعمل بوكس آخر برتبة مختلفة.**');
+            await message.reply('🎉 **تم إنشاء البوكس الموحد بنجاح تام! يحتوي الآن على الأقسام المتعددة التي قمت بتخصيصها برتب استلام مختلفة ومستقلة.**');
 
             tempSetup.delete(message.author.id);
         }
@@ -219,7 +260,6 @@ client.on('messageCreate', async message => {
                 .setDescription(state.description)
                 .setColor('#5865F2');
 
-            // زر مخصص يفتح تذكرة عامة أو مخصصة حسب رغبتك
             const customButton = new ButtonBuilder()
                 .setCustomId('general_embed_button_action')
                 .setLabel(state.buttonLabel)
@@ -236,8 +276,9 @@ client.on('messageCreate', async message => {
     }
 });
 
-// التعامل مع التفاعلات والسلاش والأزرار
+// التعامل مع التفاعلات والسلاش والأزرار وحل مشكلة التأخير (Lag) بالكامل
 client.on('interactionCreate', async interaction => {
+    // تشغيل الأوامر التفاعلية
     if (interaction.isChatInputCommand()) {
         if (interaction.commandName === 'setup') {
             await startInteractiveSetup(interaction, interaction.channel, interaction.user);
@@ -247,14 +288,18 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // فتح التذاكر من القوائم المنسدلة المخصصة
+    // فتح تكت من القوائم المنسدلة المتعددة
     if (interaction.isStringSelectMenu()) {
-        if (interaction.customId.startsWith('custom_ticket_menu_')) {
+        if (interaction.customId.startsWith('multi_t_menu_')) {
+            // معالجة فورية وتأكيد الاستجابة فوراً لتجنب أي تعليق أو بطء
             await interaction.deferReply({ ephemeral: true });
 
             const parts = interaction.customId.split('_');
-            const targetRoleId = parts[3];
             const targetCategoryId = parts[4] === 'none' ? null : parts[4];
+
+            // جلب أيدي رتبة الاستلام ديناميكياً من الاختيار المحدد لتفادي التداخل
+            const selectedValue = interaction.values[0];
+            const targetRoleId = selectedValue.replace('opaction_', '');
 
             const guild = interaction.guild;
             const member = interaction.member;
@@ -264,7 +309,7 @@ client.on('interactionCreate', async interaction => {
                 { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
             ];
 
-            if (targetRoleId) {
+            if (targetRoleId && targetRoleId !== 'none') {
                 permissionOverwrites.push({
                     id: targetRoleId,
                     allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
@@ -279,12 +324,12 @@ client.on('interactionCreate', async interaction => {
                     permissionOverwrites: permissionOverwrites
                 });
 
-                // تخزين صاحب التذكرة في موضوع القناة (Topic) لنتمكن من استدعائه لاحقاً بـ !ping
+                // حفظ أيدي صانع التكت في التوبك فوراً
                 await channel.setTopic(`creator_id:${member.id}`);
 
                 const welcomeEmbed = new EmbedBuilder()
-                    .setTitle('تذكرة دعم فني جديدة')
-                    .setDescription(`مرحباً بك ${member}، لقد قمت بفتح تذكرة فنية مخصصة.\n\nيرجى الانتظار حتى يقوم أحد أفراد الرتبة المحددة باستلام تذكرتك ومساعدتك.`)
+                    .setTitle('تذكرة دعم جديدة')
+                    .setDescription(`مرحباً بك ${member}، تم فتح التذكرة الخاصة بك بنجاح وتحويلها للقسم المختص.\n\nيرجى كتابة استفسارك هنا بوضوح وانتظار استلام المشرفين للتذكرة لمساعدتك.`)
                     .setColor('#5865F2')
                     .setTimestamp();
 
@@ -309,16 +354,16 @@ client.on('interactionCreate', async interaction => {
                     components: [row] 
                 });
 
-                await interaction.editReply({ content: `تم فتح التذكرة المخصصة بنجاح: ${channel}` });
+                await interaction.editReply({ content: `تم فتح تذكرتك بنجاح في القناة: ${channel}` });
 
             } catch (error) {
                 console.error(error);
-                await interaction.editReply({ content: 'حدث خطأ أثناء إنشاء التذكرة الفنية المخصصة.' });
+                await interaction.editReply({ content: '❌ حدث خطأ غير متوقع أثناء محاولة إنشاء التذكرة.' });
             }
         }
     }
 
-    // التعامل مع الأزرار وتحديث نظام الاستلام والتنبيهات
+    // معالجة الأزرار (حل تعليق و Lag الاستلام والإغلاق بشكل كامل وفوري)
     if (interaction.isButton()) {
         const customId = interaction.customId;
 
@@ -333,7 +378,9 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({ content: '❌ لا يمكنك استلام هذه التذكرة لأنك لا تملك الرتبة المخصصة للتحكم فيها!', ephemeral: true });
             }
 
-            // تحديث التوبك وحفظ اسم المستلم
+            // الاستجابة بشكل فوري للغاية لإنهاء التفاعل لمنع ظهور "Interaction Failed"
+            await interaction.deferUpdate();
+
             const topic = interaction.channel.topic || '';
             const creatorId = topic.split(':')[1]?.split(';')[0] || '';
             await interaction.channel.setTopic(`creator_id:${creatorId};claimed_by:${member.id}`);
@@ -356,9 +403,8 @@ client.on('interactionCreate', async interaction => {
 
             const row = new ActionRowBuilder().addComponents(disabledClaimButton, closeButton);
 
-            await interaction.update({ embeds: [updatedEmbed], components: [row] });
+            await interaction.editReply({ embeds: [updatedEmbed], components: [row] });
             
-            // التنبيه المخصص الذي طلبته تماماً عند استلام التكت
             const creatorMention = creatorId ? `<@${creatorId}>` : '';
             await interaction.followUp({ content: `${creatorMention} **تم استلام تكت عن طريق هذا الإدارة: ${member}، تابع معه.**` });
         }
@@ -373,9 +419,10 @@ client.on('interactionCreate', async interaction => {
             const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
 
             if (!isClaimer && !hasSupportRole && !isAdmin) {
-                return interaction.reply({ content: '❌ لا يمكنك إغلاق التذكرة، الإغلاق متاح فقط لمن استلمها أو الرتبة المخصصة.', ephemeral: true });
+                return interaction.reply({ content: '❌ لا يمكنك إغلاق التذكرة، الإغلاق متاح فقط لمن استلمها أو الرتبة المخصصة للقسم.', ephemeral: true });
             }
 
+            // استجابة فورية لتجنب الـ Lag وحذف القناة بعد 5 ثوانٍ مباشرة
             await interaction.reply({ content: '⚠️ سيتم حذف التذكرة نهائياً وإغلاق القناة خلال 5 ثوانٍ...' });
             setTimeout(async () => {
                 try {
@@ -386,7 +433,7 @@ client.on('interactionCreate', async interaction => {
             }, 5000);
         }
 
-        // التعامل مع زر الإمبد العام المخصص
+        // التعامل مع زر الإمبد المخصص العام
         if (customId === 'general_embed_button_action') {
             await interaction.reply({ content: 'سيتم فتح تذكرة عامة لك الآن...', ephemeral: true });
             const guild = interaction.guild;
