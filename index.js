@@ -34,49 +34,49 @@ const EMBED_PREFIX = '-em';
 const embedSetup = new Map();
 
 // ==================== إعدادات نظام التذاكر المطور والمستقر ====================
+// تأكد من وضع الأرقام الحقيقية هنا لاحقاً ليعمل نظام المنشن والاستلام بشكل صحيح
 const TICKET_CONFIG = {
-    categoryID: 'ايدي_قسم_التذاكر_هنا', // ضع هنا أيدي قسم التذاكر
+    categoryID: '123456789012345678', // ضع أيدي القسم هنا (رقم فقط)
 
     // روابط الصور
-    mainEmbedImage: 'https://i.imgur.com/ضع_رابط_صورة_البوكس_الرئيسي_هنا.png', 
-    ticketEmbedImage: 'https://i.imgur.com/ضع_رابط_صورة_التذكرة_الداخلية_هنا.png',
+    mainEmbedImage: '', 
+    ticketEmbedImage: '',
 
-    // الخيارات الخمسة المستقلة مع رتبها
     options: [
         {
             value: 'option_1',
             label: 'الدعم الفني والتقني',
             description: 'للمشاكل البرمجية والتقنية داخل السيرفر',
             emoji: '🛠️',
-            roleId: 'ايدي_رتبة_القسم_1_هنا', 
+            roleId: '123456789012345678', // ضع أيدي الرتبة هنا (رقم فقط)
         },
         {
             value: 'option_2',
             label: 'الاستفسارات العامة',
             description: 'لأي سؤال عام تود طرحه على الإدارة',
             emoji: '❓',
-            roleId: 'ايدي_رتبة_القسم_2_هنا', 
+            roleId: '123456789012345678', 
         },
         {
             value: 'option_3',
             label: 'الشكاوى والبلاغات',
             description: 'لتقديم شكوى ضد عضو أو الإبلاغ عن مشكلة',
             emoji: '⚠️',
-            roleId: 'ايدي_رتبة_القسم_3_هنا', 
+            roleId: '123456789012345678', 
         },
         {
             value: 'option_4',
             label: 'المبيعات والاشتراكات',
             description: 'للاستفسار عن الأسعار أو الشراء المباشر',
             emoji: '💰',
-            roleId: 'ايدي_رتبة_القسم_4_هنا', 
+            roleId: '123456789012345678', 
         },
         {
             value: 'option_5',
             label: 'الإدارة العليا',
             description: 'للتواصل المباشر والحالات الخاصة جداً',
             emoji: '👑',
-            roleId: 'ايدي_رتبة_القسم_5_هنا', 
+            roleId: '123456789012345678', 
         }
     ]
 };
@@ -102,11 +102,10 @@ client.once('ready', async () => {
         );
         console.log('Slash commands registered successfully.');
     } catch (error) {
-        console.error(error);
+        console.error('Error registering slash commands:', error);
     }
 });
 
-// دالة إرسال البوكس الموحد
 async function sendTicketSetup(channel) {
     const embed = new EmbedBuilder()
         .setTitle('الدعم الفني والخدمات | Support Portal')
@@ -134,10 +133,9 @@ async function sendTicketSetup(channel) {
     await channel.send({ embeds: [embed], components: [row] });
 }
 
-// دالة بدء الإعداد التفاعلي للإمبد المخصص مع الأزرار
 async function startEmbedSetup(channel, user) {
     const member = channel.guild.members.cache.get(user.id);
-    if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+    if (!member || !member.permissions.has(PermissionFlagsBits.Administrator)) {
         return channel.send('❌ عذراً، هذا الأمر مخصص للإداريين فقط.');
     }
 
@@ -147,11 +145,9 @@ async function startEmbedSetup(channel, user) {
     await channel.send(`${user}, 📝 **بدء إعداد إمبد مخصص**\n\n**الخطوة [1/3]:** يرجى كتابة **عنوان (Title)** الإمبد:`);
 }
 
-// التعامل مع الاختصارات والأوامر في الشات
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
-    // الاختصار -st لبوكس التذاكر
     if (message.content.trim() === TICKET_PREFIX) {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return message.reply('❌ عذراً، هذا الأمر مخصص للإداريين فقط.');
@@ -165,7 +161,6 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // الاختصار -em للإمبد المخصص
     if (message.content.trim() === EMBED_PREFIX) {
         try {
             await startEmbedSetup(message.channel, message.author);
@@ -176,7 +171,6 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // تتبع خطوات إعداد الإمبد المخصص -em
     if (embedSetup.has(message.author.id)) {
         const state = embedSetup.get(message.author.id);
 
@@ -216,21 +210,21 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // أمر استدعاء العضو داخل التكت المفتوح !ping
     if (message.content.trim().toLowerCase() === '!ping') {
         const topic = message.channel.topic || '';
         if (topic.includes('creator_id:')) {
             const creatorPart = topic.split('creator_id:')[1];
             const creatorId = creatorPart ? creatorPart.split(';')[0] : null;
-            const member = message.guild.members.cache.get(creatorId);
-            if (member) {
-                return message.channel.send(`🔔 تنبيه للعضو: ${member}، يرجى مراجعة التذكرة لمتابعة الرد مع الإدارة.`);
+            if (creatorId) {
+                const member = message.guild.members.cache.get(creatorId);
+                if (member) {
+                    return message.channel.send(`🔔 تنبيه للعضو: ${member}، يرجى مراجعة التذكرة لمتابعة الرد مع الإدارة.`);
+                }
             }
         }
     }
 });
 
-// التعامل مع السلاش والتفاعلات بشكل مستقر وسريع جداً
 client.on('interactionCreate', async interaction => {
     if (interaction.isChatInputCommand()) {
         if (interaction.commandName === 'setup-ticket') {
@@ -242,7 +236,6 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // فتح تذكرة عند اختيار خيار من القائمة
     if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'ticket_menu_select') {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -262,18 +255,20 @@ client.on('interactionCreate', async interaction => {
                 { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
             ];
 
-            if (selectedOption.roleId) {
+            const targetRole = guild.roles.cache.get(selectedOption.roleId);
+            if (targetRole) {
                 permissionOverwrites.push({
-                    id: selectedOption.roleId,
+                    id: targetRole.id,
                     allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
                 });
             }
 
             try {
+                const parentId = guild.channels.cache.get(TICKET_CONFIG.categoryID) ? TICKET_CONFIG.categoryID : null;
                 const channel = await guild.channels.create({
                     name: `ticket-${selectedOption.value}-${member.user.username}`,
                     type: ChannelType.GuildText,
-                    parent: TICKET_CONFIG.categoryID || null,
+                    parent: parentId,
                     permissionOverwrites: permissionOverwrites
                 });
 
@@ -303,7 +298,7 @@ client.on('interactionCreate', async interaction => {
 
                 const row = new ActionRowBuilder().addComponents(claimButton, closeButton);
 
-                const supportRoleMention = selectedOption.roleId ? `<@&${selectedOption.roleId}>` : '';
+                const supportRoleMention = targetRole ? `<@&${targetRole.id}>` : '';
                 await channel.send({ 
                     content: `${member} ${supportRoleMention}`, 
                     embeds: [welcomeEmbed], 
@@ -319,11 +314,9 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // تفاعل الأزرار
     if (interaction.isButton()) {
         const customId = interaction.customId;
 
-        // زر استلام التذكرة
         if (customId.startsWith('claim_ticket_')) {
             const optionValue = customId.replace('claim_ticket_', '');
             const selectedOption = TICKET_CONFIG.options.find(opt => opt.value === optionValue);
@@ -331,7 +324,8 @@ client.on('interactionCreate', async interaction => {
             if (!selectedOption) return;
 
             const member = interaction.member;
-            const hasRequiredRole = member.roles.cache.has(selectedOption.roleId) || member.permissions.has(PermissionFlagsBits.Administrator);
+            const targetRole = interaction.guild.roles.cache.get(selectedOption.roleId);
+            const hasRequiredRole = (targetRole && member.roles.cache.has(targetRole.id)) || member.permissions.has(PermissionFlagsBits.Administrator);
 
             if (!hasRequiredRole) {
                 return interaction.reply({ content: '❌ لا يمكنك استلام هذه التذكرة لأنك لا تملك الرتبة المخصصة للتحكم فيها!', flags: MessageFlags.Ephemeral });
@@ -367,7 +361,6 @@ client.on('interactionCreate', async interaction => {
             await interaction.followUp({ content: `${creatorMention} **تم استلام تكت عن طريق هذا الإدارة: ${member}، تابع معه.**` });
         }
 
-        // زر إغلاق التذكرة المخصصة
         if (customId.startsWith('close_ticket_')) {
             const optionValue = customId.replace('close_ticket_', '');
             const selectedOption = TICKET_CONFIG.options.find(opt => opt.value === optionValue);
@@ -392,7 +385,6 @@ client.on('interactionCreate', async interaction => {
             }, 5000);
         }
 
-        // زر الإمبد المخصص العام
         if (customId === 'general_embed_button_action') {
             await interaction.reply({ content: 'سيتم فتح تذكرة عامة لك الآن...', flags: MessageFlags.Ephemeral });
             const guild = interaction.guild;
