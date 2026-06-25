@@ -16,10 +16,9 @@ const {
 } = require('discord.js');
 const express = require('express');
 
-// تشغيل خادم الويب لمنصة Render بأقصى سرعة واستقرار
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Rocket League Bot Active!'));
+app.get('/', (req, res) => res.send('Ticket Bot Active!'));
 app.listen(PORT, '0.0.0.0', () => console.log(`Server connected to port ${PORT}`));
 
 const client = new Client({
@@ -31,7 +30,7 @@ const client = new Client({
     ]
 });
 
-// الاختصارات والأوامر الأساسية المحددة من قبلك
+// الاختصارات والأوامر الأساسية
 const TICKET_PREFIX = '-st'; 
 const EMBED_PREFIX = '-em';  
 const DM_PREFIX = '-dm';     
@@ -131,7 +130,6 @@ client.on(Events.GuildCreate, async guild => {
 
 // ترحيب فوري وسريع للأعضاء بالصورة والاسم (دون أي تأخير بروتوكولي في ريندر)
 client.on('guildMemberAdd', async member => {
-    // 1. الترحيب ببطاقة إمبد احترافية تحتوي على الاسم والصورة
     const welcomeChannelId = tempSetup.get('welcome_channel_id');
     if (welcomeChannelId) {
         const welcomeChannel = member.guild.channels.cache.get(welcomeChannelId);
@@ -139,7 +137,7 @@ client.on('guildMemberAdd', async member => {
             const welcomeEmbed = new EmbedBuilder()
                 .setTitle('✨ عضو جديد انضم إلينا!')
                 .setDescription(`👋 أهلاً بك يا ${member} في سيرفرنا الرائع!\nيسعدنا جداً انضمامك ونتمنى لك وقتاً ممتعاً معنا.`)
-                .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 })) // صورة حسابه الشخصية الدائرية بدقة عالية
+                .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 })) 
                 .setColor('#5865F2')
                 .addFields(
                     { name: '👤 اسم المستخدم', value: `\`${member.user.username}\``, inline: true },
@@ -575,6 +573,16 @@ client.on('messageCreate', async message => {
                 state.imageUrl = null;
             }
 
+            const broadcastEmbed = new EmbedBuilder()
+                .setTitle(state.title)
+                .setDescription(state.description)
+                .setColor('#5865F2')
+                .setTimestamp();
+
+            if (state.imageUrl) {
+                broadcastEmbed.setImage(state.imageUrl);
+            }
+
             const statusMsg = await message.channel.send('⏳ **جاري بدء عملية البرودكاست التدريجي والآمن لمنع البان...**');
 
             setTimeout(async () => {
@@ -661,7 +669,7 @@ client.on('interactionCreate', async interaction => {
             const guild = interaction.guild;
             const member = interaction.member;
 
-            // حظر فتح أكثر من تذكرة واحدة للعضو في نفس الوقت لمنع الحرق والتخريب
+            // حظر فتح أكثر من تذكرة واحدة للعضو في نفس الوقت لمنع التخريب
             const existingChannel = guild.channels.cache.find(c => c.name.startsWith('ticket-') && c.name.endsWith(member.user.username));
             if (existingChannel) {
                 return interaction.editReply({ content: `❌ لا يمكنك فتح تذكرة جديدة؛ لأن لديك تذكرة مفتوحة بالفعل وهي: ${existingChannel}` });
