@@ -11,15 +11,30 @@ const {
     ChannelType,
     REST,
     Routes,
-    MessageFlags,
-    Events
+    MessageFlags
 } = require('discord.js');
 const express = require('express');
 const { createCanvas, loadImage } = require('@napi-rs/canvas'); 
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// نظام تخزين التحقق التلقائي (OAuth2)
+let verifiedUsersCount = 0; 
+let verifyUrl = 'https://discord.com/api/oauth2/authorize...'; // الرابط الافتراضي للتحقق
+
 app.get('/', (req, res) => res.send('Bot is ready!'));
+// رابط استقبال التحويل (Callback/Redirect) للـ OAuth2 لتسجيل الأعضاء بنجاح
+app.get('/callback', async (req, res) => {
+    const code = req.query.code;
+    if (code) {
+        verifiedUsersCount++; // زيادة عدد الموثقين بمجرد إتمام التحقق
+        res.send('<h1>✅ Verified Successfully! You can now close this tab.</h1>');
+    } else {
+        res.send('<h1>❌ Verification Failed. Please try again.</h1>');
+    }
+});
+
 app.listen(PORT, '0.0.0.0', () => console.log(`Server connected to port ${PORT}`));
 
 const client = new Client({
@@ -45,6 +60,11 @@ const LOG_TICKET_PREFIX = '-lgt';
 const DM_BROADCAST_PREFIX = '-dm';
 const HELP_PREFIX = '-hp';
 
+// اختصارات نظام التحقق المطور (Verify System) - مخفية من -hp
+const VERIFY_SETUP_PREFIX = '-vr';    // إرسال البوكس في الروم
+const SET_VERIFY_URL_PREFIX = '-vt';  // تعيين رابط التحقق
+const COUNT_VERIFY_PREFIX = '-vf';    // معرفة عدد الموافقين
+
 const tempSetup = new Map();
 const dmSetup = new Map();
 const userWarns = new Map();
@@ -59,47 +79,32 @@ let logTicketChannelId = null;
 let autoMemberRoleId = null;
 let autoBotRoleId = null;
 
-let activeBroadcast = null;
-
-const TOKEN = process.env.TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
-
-// استخدام 'clientReady' لتفادي تحذيرات ديسكورد v15 المنوه عنها بالسجلات
-client.once('clientReady', async () => {
+client.once('ready', async () => {
     console.log(`Bot logged in as ${client.user.tag}`);
     const commands = [
         { name: 'setup', description: 'بدء إعداد نظام التذاكر المتعدد التفاعلي' }
     ];
-    const rest = new REST({ version: '10' }).setToken(TOKEN);
+    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
     try {
-        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+        await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
         console.log('Commands registered.');
     } catch (e) {
         console.error(e);
     }
 });
 
-// توافقية إضافية لضمان التشغيل في كل الحالات
-client.once('ready', async () => {
-    if (client.isReady()) return;
-    console.log(`Bot logged in as ${client.user.tag}`);
-});
-
-// دالة توليد بطاقة مرسومة بالكانفا (للدخول أو الخروج)
+// توليد بطاقة ترحيب ومغادرة الكانفا فائقة السرعة
 async function generateCard(member, title, colorHex) {
     const canvas = createCanvas(700, 250);
     const ctx = canvas.getContext('2d');
 
-    // الخلفية
     ctx.fillStyle = '#23272a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // إطار ملوّن أنيق بحدود مائلة
     ctx.strokeStyle = colorHex;
     ctx.lineWidth = 8;
     ctx.strokeRect(5, 5, canvas.width - 10, canvas.height - 10);
 
-    // نصوص فنية
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 36px Arial';
     ctx.fillText(title, 250, 100);
@@ -112,7 +117,6 @@ async function generateCard(member, title, colorHex) {
     ctx.font = '16px Arial';
     ctx.fillText(`ID: ${member.user.id}`, 250, 185);
 
-    // رسم صورة العضو الدائرية
     try {
         const avatarUrl = member.user.displayAvatarURL({ extension: 'png', size: 256 });
         const avatarImage = await loadImage(avatarUrl);
@@ -135,11 +139,11 @@ async function generateCard(member, title, colorHex) {
     return canvas.toBuffer('image/png');
 }
 
-// دالة المساعدة المحدثة بالكامل دون مراجع للأسئلة
+// دليل الشرح والمساعدة الموحد الشامل -hp (مخفي منه أوامر التحقق تماماً)
 function getHelpEmbed() {
     return new EmbedBuilder()
         .setTitle('⚙️ دليل أوامر واختصارات البوت الكامل والمستقر')
-        .setDescription('إليك الشرح لجميع الميزات والاختصارات الحصرية المتاحة لك الآن لتهيئة السيرفر:')
+        .setDescription('إليك الشرح لجميع الميزات والاختصارات الحصرية المتاحة لتهيئة السيرفر:')
         .setColor('#5865F2')
         .addFields(
             { name: '📂 أولاً: اختصارات اللوج وقنوات المراقبة والمنع', value:
@@ -155,14 +159,12 @@ function getHelpEmbed() {
             { name: '🎫 ثالثاً: اختصارات التصميم والإرسال التفاعلي والبرودكاست', value:
                 `**${TICKET_SETUP_PREFIX}** : لبدء الإعداد التفاعلي المتقدم لبوكس تذاكر موحد (من 1 إلى 10 خيارات) مع الرتب المخصصة للاستلام والشرح.\n` +
                 `**${PIC_ONLY_PREFIX}** : يكتب داخل الروم لتفعيل نظام **(صور وفيديوهات فقط)** ومسح النصوص وتحذير الأعضاء بالخاص.\n` +
-                `**${DM_BROADCAST_PREFIX}** : لبدء برودكاست جماعي تفاعلي يبدأ بإرسال الرسائل للأعضاء المتصلين (Online) أولاً ثم البقية لتجنب الباند.\n` +
-                `**${HELP_PREFIX}** : لعرض دليل المساعدة والشرح الموحد الماثل أمامك الآن.`
+                `**${DM_BROADCAST_PREFIX}** : لبدء برودكاست جماعي تفاعلي يبدأ بإرسال الرسائل للأعضاء المتصلين (Online) أولاً ثم البقية لتجنب الباند.`
             }
         )
         .setTimestamp();
 }
 
-// قراءة دخول الأعضاء (الترحيب + اللوج + الرتب التلقائية)
 client.on('guildMemberAdd', async member => {
     if (member.user.bot) {
         if (autoBotRoleId) {
@@ -192,7 +194,6 @@ client.on('guildMemberAdd', async member => {
     }
 });
 
-// قراءة خروج ومغادرة الأعضاء ورسم بطاقة المغادرة
 client.on('guildMemberRemove', async member => {
     if (byeChannelId) {
         const byeChannel = member.guild.channels.cache.get(byeChannelId);
@@ -210,7 +211,6 @@ client.on('guildMemberRemove', async member => {
     }
 });
 
-// دالة مساعدة لتحديد قنوات اللوج أو الإعداد بيسر وسهولة
 async function handleConfigSetup(message, prefix, name) {
     const args = message.content.slice(prefix.length).trim().split(/ +/);
     const channelMention = message.mentions.channels.first();
@@ -228,7 +228,6 @@ async function handleConfigSetup(message, prefix, name) {
     return targetChannel.id;
 }
 
-// الاستماع للرسائل وتطبيق كامل العمليات المطلوبة بدقة تامة
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
@@ -240,7 +239,47 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // 1. ميزة إنشاء روم نصي بصلاحيات الـ @everyone فقط (-rm [الاسم])
+    // 1. نظام التحقق المطور المكتوم (Verify System) - مخفي من المساعدة
+    if (content === VERIFY_SETUP_PREFIX) {
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+        const embed = new EmbedBuilder()
+            .setTitle('🛡️ Server Verification / التحقق الذاتي')
+            .setDescription('Please click the button below to verify yourself and get full access to the server.\n\nالرجاء الضغط على الزر أدناه لإتمام التحقق وتفعيل حسابك بالكامل بداخل السيرفر.')
+            .setColor('#2b2d31');
+
+        const verifyButton = new ButtonBuilder()
+            .setLabel('Verify yourself')
+            .setURL(verifyUrl)
+            .setStyle(ButtonStyle.Link)
+            .setEmoji('✅');
+
+        const row = new ActionRowBuilder().addComponents(verifyButton);
+
+        await message.channel.send({ embeds: [embed], components: [row] });
+        await message.delete().catch(() => {});
+        return;
+    }
+
+    if (content.startsWith(SET_VERIFY_URL_PREFIX)) {
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+        const newUrl = content.replace(SET_VERIFY_URL_PREFIX, '').trim();
+        if (!newUrl || !newUrl.startsWith('http')) {
+            return message.reply('❌ يرجى وضع رابط الـ OAuth2 الصحيح للتحقق (مثال: `-vt https://discord.com/...`):');
+        }
+        verifyUrl = newUrl;
+        await message.reply('✅ **تم بنجاح حفظ وتحديث رابط التحقق الذاتي الخاص بك!**');
+        await message.delete().catch(() => {});
+        return;
+    }
+
+    if (content === COUNT_VERIFY_PREFIX) {
+        if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+        await message.reply(`📊 **إحصائية التحقق المطور:**\nالعدد الكلي للأعضاء الموافقين والموثقين بنجاح هو: \`${verifiedUsersCount}\` عضو.`);
+        return;
+    }
+
+    // إنشاء روم نصي بصلاحيات الـ @everyone فقط (-rm [الاسم])
     if (content.startsWith(CREATE_ROOM_PREFIX)) {
         if (!message.member.permissions.has(PermissionFlagsBits.ManageChannels)) return;
 
@@ -344,7 +383,7 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // أمر تحويل الروم إلى (روم صور فقط) -puc
+    // أمر تحويل الروم إلى (روم صور وفيديوهات فقط) -puc
     if (content === PIC_ONLY_PREFIX) {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
         picOnlyChannelId = message.channel.id;
@@ -353,14 +392,37 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // البرودكاست الخاص فائق السرعة والآمن بالكامل لتجنب الباند (-dm) - متصل أولا ثم غير متصل
+    // البوكس المخصص للتذاكر التفاعلية لإنشاء البوكسات
+    if (content === TICKET_SETUP_PREFIX) {
+        const member = message.member;
+        if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return message.reply('❌ عذراً، هذا الأمر مخصص للإداريين فقط.');
+        }
+
+        const setupState = { 
+            step: 'get_count',
+            optionsCount: 0,
+            currentOptionIndex: 0,
+            options: [], 
+            imageUrl: null,
+            categoryId: null,
+            messagesToDelete: [] 
+        };
+        tempSetup.set(message.author.id, setupState);
+
+        const prompt = await message.channel.send(`${message.author}, ⚙️ **بدء إعداد بوكس تذاكر مخصص بالكامل**\n\n**الخطوة [1]:** كم عدد الأقسام (الخيارات) التي تريد وضعها في هذا البوكس؟ (اكتب رقماً من **1 إلى 10**):`);
+        setupState.messagesToDelete.push(message.id, prompt.id);
+        return;
+    }
+
+    // برودكاست الخاص فائق السرعة والآمن بالكامل لتجنب الباند (-dm) - يسأل هل تود المنشن أم لا
     if (content === DM_BROADCAST_PREFIX) {
         if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return;
 
-        const broadcastState = { step: 1, title: null, description: null, imageUrl: null, messagesToDelete: [] };
+        const broadcastState = { step: 1, title: null, description: null, imageUrl: null, needPing: 'لا', messagesToDelete: [] };
         dmSetup.set(message.author.id, broadcastState);
 
-        const prompt = await message.channel.send(`${message.author}, 📢 **بدء إعداد برودكاست الخاص الآمن**\n\n**الخطوة [1/3]:** يرجى كتابة **عنوان** رسالة البرودكاست:`);
+        const prompt = await message.channel.send(`${message.author}, 📢 **بدء إعداد برودكاست الخاص الذكي والآمن (أونلاين أولاً)**\n\n**الخطوة [1/4]:** يرجى كتابة **عنوان** رسالة البرودكاست:`);
         broadcastState.messagesToDelete.push(message.id, prompt.id);
         return;
     }
@@ -422,7 +484,7 @@ client.on('messageCreate', async message => {
                 return;
             } else {
                 state.step = 'get_image';
-                const nextPrompt = await message.reply(`✅ تم الانتهاء من إعداد جميع الأقسام بنجاح!\n\n🖼 يرجى وضع **رابط الصورة (Image URL)** للبوكس الرئيسي (إذا كنت لا تريد صورة اكتب: \`لا\`):`);
+                const nextPrompt = await message.reply(`✅ تم الانهاء من إعداد جميع الأقسام بنجاح!\n\n🖼 يرجى وضع **رابط الصورة (Image URL)** للبوكس الرئيسي (إذا كنت لا تريد صورة اكتب: \`لا\`):`);
                 state.messagesToDelete.push(nextPrompt.id);
                 return;
             }
@@ -477,7 +539,7 @@ client.on('messageCreate', async message => {
 
             await message.channel.send({ embeds: [embed], components: [row] });
             
-            // تصفية جميع رسائل الإعداد تلقائياً
+            // تصفية جميع رسائل الإعداد تلقائياً ليبقى الشات نظيفاً
             setTimeout(async () => {
                 for (const msgId of state.messagesToDelete) {
                     await message.channel.messages.delete(msgId).catch(() => {});
@@ -488,7 +550,7 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // تتبع برودكاست الخاص فائق السرعة والآمن (متصل أولاً ثم غير متصل)
+    // تتبع خطوات البرودكاست الخاص -dm (متصل أولاً ثم غير متصل)
     if (dmSetup.has(message.author.id)) {
         const state = dmSetup.get(message.author.id);
         state.messagesToDelete.push(message.id);
@@ -496,7 +558,7 @@ client.on('messageCreate', async message => {
         if (state.step === 1) {
             state.title = message.content.trim();
             state.step = 2;
-            const prompt2 = await message.reply(`✅ تم حفظ العنوان.\n\n**الخطوة [2/3]:** يرجى كتابة **الوصف (محتوى الرسالة)**:`);
+            const prompt2 = await message.reply(`✅ تم حفظ العنوان.\n\n**الخطوة [2/4]:** يرجى كتابة **الوصف (محتوى الرسالة)**:`);
             state.messagesToDelete.push(prompt2.id);
             return;
         }
@@ -504,7 +566,7 @@ client.on('messageCreate', async message => {
         if (state.step === 2) {
             state.description = message.content.trim();
             state.step = 3;
-            const prompt3 = await message.reply(`✅ تم حفظ الوصف.\n\n**الخطوة [3/3] الأخيرة:** ضع رابط صورة للرسالة (أو اكتب \`لا\` للإلغاء):`);
+            const prompt3 = await message.reply(`✅ تم حفظ الوصف.\n\n**الخطوة [3/4]:** ضع رابط صورة للرسالة (أو اكتب \`لا\` للإلغاء):`);
             state.messagesToDelete.push(prompt3.id);
             return;
         }
@@ -516,6 +578,15 @@ client.on('messageCreate', async message => {
             } else {
                 state.imageUrl = null;
             }
+            state.step = 4;
+            const prompt4 = await message.reply(`✅ تم حفظ الصورة.\n\n**الخطوة [4/4] الأخيرة:** هل تريد الإشارة والمنشن للعضو بداخل الرسالة الخاصة؟ (اكتب **نعم** أو **لا**):`);
+            state.messagesToDelete.push(prompt4.id);
+            return;
+        }
+
+        if (state.step === 4) {
+            const input = message.content.trim();
+            state.needPing = input === 'نعم' ? 'نعم' : 'لا';
 
             // تصفية وحذف محادثات الإعداد فوراً لشات نظيف
             setTimeout(async () => {
@@ -548,9 +619,10 @@ client.on('messageCreate', async message => {
 
                 const targetMember = sortedMembers[index];
                 
+                const pingText = state.needPing === 'نعم' ? `👋 مرحباً بك يا ${targetMember}!\n\n` : '';
                 const personalEmbed = new EmbedBuilder()
                     .setTitle(state.title)
-                    .setDescription(`👋 مرحباً بك يا ${targetMember}!\n\n${state.description}`)
+                    .setDescription(`${pingText}${state.description}`)
                     .setColor('#5865F2')
                     .setTimestamp();
 
@@ -575,7 +647,7 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 8. حماية روم الصور فقط ومسح النصوص وتنبيه العضو واللوج التلقائي للتخريب
+    // حماية روم الصور فقط ومسح النصوص وتنبيه العضو واللوج التلقائي للتخريب
     if (picOnlyChannelId && message.channel.id === picOnlyChannelId) {
         const hasAttachment = message.attachments.size > 0;
         const hasEmbedImage = message.embeds.some(e => e.image || e.thumbnail);
@@ -606,6 +678,57 @@ client.on('messageCreate', async message => {
         }
     }
 });
+
+// معالجة اللوج والتقييمات والتذاكر
+async function sendTicketLog(guild, channelName, creatorId, claimerId, closerUser) {
+    if (!logTicketChannelId) return;
+    const logChannel = guild.channels.cache.get(logTicketChannelId);
+    if (!logChannel) return;
+
+    const creator = guild.members.cache.get(creatorId);
+    const claimer = claimerId ? guild.members.cache.get(claimerId) : 'لا يوجد (لم تُستلم التذكرة)';
+
+    const logEmbed = new EmbedBuilder()
+        .setTitle('📂 سجل إغلاق تذكرة | Ticket Logs')
+        .setColor('#e74c3c')
+        .addFields(
+            { name: '📝 اسم التذكرة', value: `\`${channelName}\``, inline: true },
+            { name: '👤 منشئ التذكرة', value: creator ? `${creator}` : `\`أيدي: ${creatorId}\``, inline: true },
+            { name: '🙋‍♂️ الإداري المستلم', value: claimerId ? `${claimer}` : '`لم يتم الاستلام`', inline: true },
+            { name: '🔒 مغلق التذكرة', value: `${closerUser}`, inline: true }
+        )
+        .setTimestamp();
+
+    try {
+        await logChannel.send({ embeds: [logEmbed] });
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+async function sendRatingLog(guild, creator, rating, claimerName) {
+    if (!logTicketChannelId) return; // يرسل اللوج في روم التذاكر المخصصة
+    const logChannel = guild.channels.cache.get(logTicketChannelId);
+    if (!logChannel) return;
+
+    const ratingStars = '⭐'.repeat(rating);
+
+    const embed = new EmbedBuilder()
+        .setTitle('⭐ تقييم تكت فني جديد | Feedback')
+        .setColor('#f1c40f')
+        .addFields(
+            { name: '👤 العضو المقيم', value: `${creator}`, inline: true },
+            { name: '🙋‍♂️ الإداري المسؤول', value: `\`${claimerName}\``, inline: true },
+            { name: '📊 التقييم المستلم', value: `${ratingStars} (${rating}/5)`, inline: true }
+        )
+        .setTimestamp();
+
+    try {
+        await logChannel.send({ embeds: [embed] });
+    } catch (err) {
+        console.error(err);
+    }
+}
 
 client.on('interactionCreate', async interaction => {
     // فتح تكت من القوائم المنسدلة المتعددة المستقلة
