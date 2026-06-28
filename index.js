@@ -139,11 +139,12 @@ app.get('/callback', async (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Server connected to port ${PORT}`));
 
+// تفعيل صلاحية قراءة محتوى الرسائل (MessageContent) بشكل صحيح وكامل
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.MessageContent, 
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildPresences
     ]
@@ -272,11 +273,9 @@ client.on('messageCreate', async message => {
     // ==================== ميزة الرد التلقائي الذكي بداخل التذاكر المفتوحة ====================
     if (message.channel.name.startsWith('ticket-')) {
         let matched = false;
-        // البحث عن الكلمات المفتاحية بداخل رسالة العضو
         for (const response of AUTO_RESPONSES) {
             if (response.keys.some(key => content.toLowerCase().includes(key))) {
                 await message.channel.sendTyping();
-                // تأخير بسيط ليبدو الرد طبيعياً وواقعياً
                 setTimeout(async () => {
                     await message.reply({ content: response.reply });
                 }, 1500);
@@ -284,11 +283,10 @@ client.on('messageCreate', async message => {
                 break;
             }
         }
-        // رد افتراضي ذكي إذا كتب العضو أي رسالة أولى ولم تتطابق الكلمات
         const topic = message.channel.topic || '';
         if (!matched && !topic.includes('ai_notified:true')) {
             await message.channel.setTopic(`${topic};ai_notified:true`);
-            await message.channel.send({ content: `🤖 **أهلاً بك يا ${message.author}! أنا البوت المساعد التلقائي.\nيرجى كتابة تفاصيل استفسارك أو مشكلتك بدقة بداخل الشات، وسأحاول إجابتك فوراً أو تنبيه طاقم الإدارة لمساعدتك.**` });
+            await message.channel.send({ content: `🤖 **أهلاً بك يا ${message.author}! أنا البوت المساعد التلقائي.\nيرجى كتابة تفاصيل استفسارك أو مشكلتك بدقة بداخل الشات، وسأحاول إجابتك فوراً وصامتاً أو تنبيه طاقم الإدارة لمساعدتك.**` });
         }
     }
     // =========================================================================================
@@ -347,9 +345,127 @@ client.on('messageCreate', async message => {
             tempSetup.delete(message.author.id);
             return;
         }
+
+        // ==================== مصلح إعداد التذاكر التفاعلي المتعدد -st ====================
+        if (state.step === 'get_count') {
+            const count = parseInt(message.content.trim());
+            if (isNaN(count) || count < 1 || count > 10) {
+                const errPrompt = await message.reply('❌ يرجى كتابة رقم صحيح من 1 إلى 10 فقط:');
+                state.messagesToDelete.push(errPrompt.id);
+                return;
+            }
+            state.optionsCount = count;
+            state.currentOptionIndex = 0;
+            state.step = 'get_option_label';
+            const nextPrompt = await message.reply(`✅ تم تحديد عدد الأقسام: **${count}**\n\n💬 **الآن لنبدأ بتجهيز القسم رقم [1]**:\nيرجى كتابة **اسم المربع / الخيار**:`);
+            state.messagesToDelete.push(nextPrompt.id);
+            return;
+        }
+
+        if (state.step === 'get_option_label') {
+            const label = message.content.trim();
+            state.options.push({ label: label, roleId: null, description: null, value: `opt_${state.currentOptionIndex + 1}` });
+            state.step = 'get_option_desc';
+            const nextPrompt = await message.reply(`✅ تم حفظ اسم القسم: **${label}**\n\n📝 يرجى كتابة **الشرح/الوصف** لهذا القسم:`);
+            state.messagesToDelete.push(nextPrompt.id);
+            return;
+        }
+
+        if (state.step === 'get_option_desc') {
+            const desc = message.content.trim();
+            state.options[state.currentOptionIndex].description = desc;
+            state.step = 'get_option_role';
+            const nextPrompt = await message.reply(`✅ تم حفظ الوصف.\n\n👤 يرجى كتابة **أيدي الرتبة (Role ID)** المسؤولة عن تذاكر هذا القسم:`);
+            state.messagesToDelete.push(nextPrompt.id);
+            return;
+        }
+
+        if (state.step === 'get_option_role') {
+            const roleId = message.content.trim();
+            const role = message.guild.roles.cache.get(roleId);
+            if (!role) {
+                const errPrompt = await message.reply('❌ أيدي الرتبة غير صحيح. يرجى كتابة أيدي رتبة صحيح وموجود بالسيرفر:');
+                state.messagesToDelete.push(errPrompt.id);
+                return;
+            }
+
+            state.options[state.currentOptionIndex].roleId = roleId;
+            state.currentOptionIndex++;
+
+            if (state.currentOptionIndex < state.optionsCount) {
+                state.step = 'get_option_label';
+                const nextPrompt = await message.reply(`✅ تم ربط الرتبة **${role.name}** بالقسم السابق.\n\n💬 **لننتقل للقسم رقم [${state.currentOptionIndex + 1}]**:\nيرجى كتابة **اسم المربع / الخيار**:`);
+                state.messagesToDelete.push(nextPrompt.id);
+                return;
+            } else {
+                state.step = 'get_image';
+                const nextPrompt = await message.reply(`✅ تم الانتهاء من إعداد جميع الأقسام بنجاح!\n\n🖼 يرجى وضع **رابط الصورة (Image URL)** للبوكس الرئيسي (إذا كنت لا تريد صورة اكتب: \`لا\`):`);
+                state.messagesToDelete.push(nextPrompt.id);
+                return;
+            }
+        }
+
+        if (state.step === 'get_image') {
+            const input = message.content.trim();
+            if (input.toLowerCase() !== 'لا' && input.startsWith('http')) {
+                state.imageUrl = input;
+            } else {
+                state.imageUrl = null;
+            }
+            state.step = 'get_category';
+            const nextPrompt = await message.reply(`✅ تم حفظ إعدادات الصورة.\n\n📂 يرجى كتابة **أيدي القسم (Category ID)** الذي تفتح فيه التذاكر (إذا كنت تريدها تفتح في أي مكان اكتب: \`لا\`):`);
+            state.messagesToDelete.push(nextPrompt.id);
+            return;
+        }
+
+        if (state.step === 'get_category') {
+            const input = message.content.trim();
+            if (input.toLowerCase() !== 'لا') {
+                state.categoryId = input;
+            } else {
+                state.categoryId = null;
+            }
+
+            const embed = new EmbedBuilder()
+                .setTitle('بوابة الدعم الفني والمساعدات | Support Portal')
+                .setDescription(`يرجى تحديد القسم المناسب لمشكلتك من القائمة المنسدلة أدناه لفتح تذكرة مباشرة مع الطاقم المختص ومتابعتك.`)
+                .setColor('#2b2d31');
+
+            if (state.imageUrl) {
+                embed.setImage(state.imageUrl);
+            }
+
+            const uniqueId = Date.now().toString().slice(-4);
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId(`multi_t_menu_${uniqueId}_${state.categoryId || 'none'}`)
+                .setPlaceholder('الرجاء اختيار قسم لفتح التذكرة...');
+
+            state.options.forEach(opt => {
+                selectMenu.addOptions(
+                    new StringSelectMenuOptionBuilder()
+                        .setValue(`opaction_${opt.roleId}`) 
+                        .setLabel(opt.label)
+                        .setDescription(opt.description || `تذكرة بقسم ${opt.label}`)
+                        .setEmoji('🎫')
+                );
+            });
+
+            const row = new ActionRowBuilder().addComponents(selectMenu);
+
+            await message.channel.send({ embeds: [embed], components: [row] });
+            
+            setTimeout(async () => {
+                for (const msgId of state.messagesToDelete) {
+                    await message.channel.messages.delete(msgId).catch(() => {});
+                }
+            }, 1000);
+
+            tempSetup.delete(message.author.id);
+        }
+        // ==============================================================================
     }
 
-    // 2. تعيين قناة لوج التحقق (-tv [#القناة])
+    // تعيين قناة لوج التحقق (-tv [#القناة])
     if (content.startsWith(LOG_VERIFY_PREFIX)) {
         if (!isAuthorized) return;
 
@@ -651,7 +767,7 @@ client.on('messageCreate', async message => {
                 }
 
                 const progressType = index < onlineMembers.length ? '🟢 جاري إرسال المتصلين (Online)' : '⚫ جاري إرسال غير المتصلين (Offline)';
-                await statusMsg.edit(`⏳ **${progressType}...**\n\n📊 التقدم الحالي: \`${index + 1}/${sortedMembers.length}\` عضو.\n✅ تم الإرسال: \`${sentCount}\` | ❌ فشل: \`${failedCount}\``);
+                await statusMsg.edit(`⏳ **${progressType}...**\n\n📊 التقدم الحالي: \`${index + 1}/${sortedMembers.length}\` عضو.\n✅ تم الإدانة: \`${sentCount}\` | ❌ فشل: \`${failedCount}\``);
                 index++;
             }, 2500); 
 
@@ -911,7 +1027,6 @@ client.on('interactionCreate', async interaction => {
 
             await sendTicketLog(interaction.guild, interaction.channel.name, creatorId, claimerId, member);
 
-            // إرسال أزرار التقييم للعضو في الخاص وحل مشكلة وصول التقييم تماماً
             const creatorUser = await interaction.guild.members.fetch(creatorId).catch(() => null);
             if (creatorUser) {
                 const ratingEmbed = new EmbedBuilder()
