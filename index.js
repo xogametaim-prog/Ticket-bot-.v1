@@ -38,11 +38,28 @@ const UserSchema = new mongoose.Schema({
 });
 
 const VerifiedUser = mongoose.model('VerifiedUser', UserSchema);
+
+// نظام حفظ عداد التذاكر التراكمي لترقيم التكتات تصاعدياً
+const CounterSchema = new mongoose.Schema({
+    id: { type: String, required: true, unique: true },
+    seq: { type: Number, default: 0 }
+});
+const Counter = mongoose.model('Counter', CounterSchema);
+
+async function getNextSequence(name) {
+    const counter = await Counter.findOneAndUpdate(
+        { id: name },
+        { $inc: { seq: 1 } },
+        { new: true, upsert: true }
+    );
+    return counter.seq;
+}
 // ====================================================================
 
 const tempSetup = new Map(); 
 const dmSetup = new Map();
 const verifyBroadcastSetup = new Map();
+const ticketInactivityTimers = new Map(); // لتتبع خمول التذاكر لمدة 45 دقيقة
 
 let liveCounterMessageId = null; 
 let liveCounterChannelId = null; 
@@ -139,12 +156,11 @@ app.get('/callback', async (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Server connected to port ${PORT}`));
 
-// تفعيل صلاحية قراءة محتوى الرسائل (MessageContent) بشكل صحيح وكامل
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent, 
+        GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildPresences
     ]
@@ -157,13 +173,11 @@ const PULL_MEMBERS_PREFIX = '-pull';
 const LOG_VERIFY_PREFIX = '-tv';      
 const LIVE_COUNTER_PREFIX = '-lc';    
 
-const TICKET_SETUP_PREFIX = '-st'; // إعداد التذاكر المتعددة
-const LOG_TICKET_PREFIX = '-lgt';  // لوج التذاكر المغلّقة
+const TICKET_SETUP_PREFIX = '-st'; 
+const LOG_TICKET_PREFIX = '-lgt';  
 
 const DM_BROADCAST_PREFIX = '-t';      
 const DM_VERIFY_PREFIX = '-vt';         
-
-let verifyUrl = 'https://discord.com/api/oauth2/authorize...'; 
 
 // ==================== قاعدة بيانات الذكاء الاصطناعي والرد التلقائي للتذاكر ====================
 const AUTO_RESPONSES = [
@@ -212,6 +226,23 @@ client.once('ready', async () => {
 client.on(Events.GuildCreate, async (guild) => {
     await createVerifyRoles(guild);
 });
+
+// دالة لتحديث أو إعادة تشغيل مؤقت الخمول (45 دقيقة) للتذكرة المفتوحة
+function resetInactivityTimer(channel, memberId) {
+    if (ticketInactivityTimers.has(channel.id)) {
+        clearTimeout(ticketInactivityTimers.get(channel.id));
+    }
+
+    // 45 دقيقة بالملي ثانية = 45 * 60 * 1000 = 2,700,000 مللي ثانية
+    const timer = setTimeout(async () => {
+        const member = channel.guild.members.cache.get(memberId);
+        if (member) {
+            await channel.send(`🔔 ${member}، **تنبيه خمول:** لقد مضت 45 دقيقة دون أي تفاعل في هذه التذكرة. إذا لم تكن بحاجة إليها، يرجى كتابة **(سكرها)** أو **(اغلقها)** أو الضغط على زر الإغلاق المخصص ليتم تصفية الروم وحفظ اللوج.`);
+        }
+    }, 2700000);
+
+    ticketInactivityTimers.set(channel.id, timer);
+}
 
 // معالجة اللوج والتقييمات والتذاكر المغلّقة
 async function sendTicketLog(guild, channelName, creatorId, claimerId, closerUser) {
@@ -264,14 +295,46 @@ async function sendRatingLog(guild, creator, rating, claimerName) {
     }
 }
 
+// دالة تنفيذ الإغلاق الفوري للتكت لتفادي التكرار
+async function executeTicketClose(channel, closerUser) {
+    const topic = channel.topic || '';
+    const creatorId = topic.split('creator_id:')[1]?.split(';')[0] || '';
+    const claimerId = topic.includes('claimed_by:') ? topic.split('claimed_by:')[1].split(';')[0] : null;
+
+    if (ticketInactivityTimers.has(channel.id)) {
+        clearTimeout(ticketInactivityTimers.get(channel.id));
+        ticketInactivityTimers.delete(channel.id);
+    }
+
+    await channel.send('⚠️ **جاري إرسال اللوج وحذف التذكرة خلال 5 ثوانٍ يدوياً...**');
+    await sendTicketLog(channel.guild, channel.name, creatorId, claimerId, closerUser);
+
+    setTimeout(async () => {
+        await channel.delete().catch(() => {});
+    }, 5000);
+}
+
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
     const content = message.content.trim();
     const isAuthorized = message.member.permissions.has(PermissionFlagsBits.Administrator) || message.member.roles.cache.some(r => r.name === 'Ownerv');
 
-    // ==================== ميزة الرد التلقائي الذكي بداخل التذاكر المفتوحة ====================
+    // ==================== ميزة الرد التلقائي الذكي ومراقبة خمول وكلام التذاكر ====================
     if (message.channel.name.startsWith('ticket-')) {
+        const topic = message.channel.topic || '';
+        const creatorId = topic.split('creator_id:')[1]?.split(';')[0] || '';
+        
+        // إعادة تنشيط مؤقت الخمول (45 دقيقة) فور ورود أي رسالة جديدة من العضو
+        if (message.author.id === creatorId) {
+            resetInactivityTimer(message.channel, creatorId);
+        }
+
+        // الاستماع لأوامر الإغلاق النصية من العضو
+        if (message.author.id === creatorId && (content === 'سكرها' || content === 'اغلقها' || content === 'أغلقها')) {
+            return await executeTicketClose(message.channel, message.author);
+        }
+
         let matched = false;
         for (const response of AUTO_RESPONSES) {
             if (response.keys.some(key => content.toLowerCase().includes(key))) {
@@ -283,7 +346,6 @@ client.on('messageCreate', async message => {
                 break;
             }
         }
-        const topic = message.channel.topic || '';
         if (!matched && !topic.includes('ai_notified:true')) {
             await message.channel.setTopic(`${topic};ai_notified:true`);
             await message.channel.send({ content: `🤖 **أهلاً بك يا ${message.author}! أنا البوت المساعد التلقائي.\nيرجى كتابة تفاصيل استفسارك أو مشكلتك بدقة بداخل الشات، وسأحاول إجابتك فوراً وصامتاً أو تنبيه طاقم الإدارة لمساعدتك.**` });
@@ -346,7 +408,7 @@ client.on('messageCreate', async message => {
             return;
         }
 
-        // ==================== مصلح إعداد التذاكر التفاعلي المتعدد -st ====================
+        // مصلح إعداد التذاكر التفاعلي المتعدد -st
         if (state.step === 'get_count') {
             const count = parseInt(message.content.trim());
             if (isNaN(count) || count < 1 || count > 10) {
@@ -366,7 +428,7 @@ client.on('messageCreate', async message => {
             const label = message.content.trim();
             state.options.push({ label: label, roleId: null, description: null, value: `opt_${state.currentOptionIndex + 1}` });
             state.step = 'get_option_desc';
-            const nextPrompt = await message.reply(`✅ تم حفظ اسم القسم: **${label}**\n\n📝 يرجى كتابة **الشرح/الوصف** لهذا القسم:`);
+            const nextPrompt = await message.reply(`✅ تم حفظ اسم القسم: **${label}**\n\n📝 يرجى كتابة **الشرح/الوصف** الذي تريده أن يظهر كشرح فرعي لهذا القسم:`);
             state.messagesToDelete.push(nextPrompt.id);
             return;
         }
@@ -462,7 +524,6 @@ client.on('messageCreate', async message => {
 
             tempSetup.delete(message.author.id);
         }
-        // ==============================================================================
     }
 
     // تعيين قناة لوج التحقق (-tv [#القناة])
@@ -767,7 +828,7 @@ client.on('messageCreate', async message => {
                 }
 
                 const progressType = index < onlineMembers.length ? '🟢 جاري إرسال المتصلين (Online)' : '⚫ جاري إرسال غير المتصلين (Offline)';
-                await statusMsg.edit(`⏳ **${progressType}...**\n\n📊 التقدم الحالي: \`${index + 1}/${sortedMembers.length}\` عضو.\n✅ تم الإدانة: \`${sentCount}\` | ❌ فشل: \`${failedCount}\``);
+                await statusMsg.edit(`⏳ **${progressType}...**\n\n📊 التقدم الحالي: \`${index + 1}/${sortedMembers.length}\` عضو.\n✅ تم الإرسال: \`${sentCount}\` | ❌ فشل: \`${failedCount}\``);
                 index++;
             }, 2500); 
 
@@ -816,7 +877,7 @@ async function handleConfigSetup(message, prefix, name) {
 }
 
 client.on('interactionCreate', async interaction => {
-    // فتح تكت من القوائم المنسدلة المتعددة المستقلة والمحفوظ فيها معلومات القسم والرتب
+    // فتح تكت من القوائم المنسدلة المتعددة المستقلة مع الترقيم التلقائي
     if (interaction.isStringSelectMenu()) {
         if (interaction.customId.startsWith('multi_t_menu_')) {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -848,8 +909,12 @@ client.on('interactionCreate', async interaction => {
             }
 
             try {
+                // ميزة ترقيم التذاكر تلقائياً (تصاعدياً) بدلاً من تسميتها باسم العضو
+                const ticketNumber = await getNextSequence('tickets');
+                const paddedNumber = String(ticketNumber).padStart(4, '0'); // لتنسيق الأرقام مثل 0001, 0002...
+
                 const channel = await guild.channels.create({
-                    name: `ticket-${member.user.username}`,
+                    name: `ticket-${paddedNumber}`, // الروم يظهر مرقماً بدقة
                     type: ChannelType.GuildText,
                     parent: targetCategoryId,
                     permissionOverwrites: permissionOverwrites
@@ -857,12 +922,16 @@ client.on('interactionCreate', async interaction => {
 
                 await channel.setTopic(`creator_id:${member.id}`);
 
+                // بدء تشغيل مؤقت الخمول (45 دقيقة) للتذكرة المفتوحة تلقائياً لمنع الهجر
+                resetInactivityTimer(channel, member.id);
+
                 const welcomeEmbed = new EmbedBuilder()
                     .setTitle('بوابة المساعدة الفنية والخدمات | Ticket Open')
-                    .setDescription(`مرحباً بك ${member}، تم فتح التذكرة الخاصة بك بنجاح وتحويلها للقسم المختص.\n\nيرجى كتابة استفسارك هنا بوضوح وانتظار استلام المشرفين للتذكرة لمساعدتك.\n\n🤖 **ملاحظة: البوت المساعد مفعّل بداخل هذا الروم وسيستمع لاستفسارك ويحاول إجابتك فوراً وصامتاً!**`)
+                    .setDescription(`تفضل يا ${member}، كيف يمكننا مساعدتك اليوم؟\n\n💬 **سؤال هام:** هل قمت بقراءة الرومات والقوانين أولاً؟ إذا لم يكن هناك رومات يرجى توضيح طلبك مباشرة في الشات لخدمتك.\n\n🤖 **ملاحظة:** البوت المساعد مفعّل بداخل هذا الروم وسيستمع لاستفسارك ويحاول إجابتك فوراً وصامتاً!`)
                     .setColor('#5865F2')
                     .setTimestamp();
 
+                // أزرار التحكم الكاملة والمطلوبة من قبلك داخل التكت المفتوح
                 const claimButton = new ButtonBuilder()
                     .setCustomId(`claim_custom_ticket_${targetRoleId}`)
                     .setLabel('استلام التكت')
@@ -893,6 +962,7 @@ client.on('interactionCreate', async interaction => {
                     .setStyle(ButtonStyle.Danger)
                     .setEmoji('🔒');
 
+                // دمج الأزرار بحد أقصى 5 أزرار في السطر الواحد
                 const row1 = new ActionRowBuilder().addComponents(claimButton, alertStaffButton, alertUserButton, requestCloseButton, closeButton);
 
                 const supportRoleMention = targetRoleId ? `<@&${targetRoleId}>` : '';
@@ -942,6 +1012,7 @@ client.on('interactionCreate', async interaction => {
                 .setStyle(ButtonStyle.Success)
                 .setDisabled(true);
 
+            // جلب الأزرار الأخرى وحظر إظهار الـ Lag
             const alertStaffButton = new ButtonBuilder().setCustomId(`alert_staff_btn_${targetRoleId}`).setLabel('تنبيه الإدارة المستلمة').setStyle(ButtonStyle.Warning).setEmoji('⚠️');
             const alertUserButton = new ButtonBuilder().setCustomId(`alert_user_btn_${targetRoleId}`).setLabel('تنبيه العضو').setStyle(ButtonStyle.Secondary).setEmoji('🔔');
             const requestCloseButton = new ButtonBuilder().setCustomId(`request_close_btn_${targetRoleId}`).setLabel('طلب إغلاق التكت').setStyle(ButtonStyle.Secondary).setEmoji('🛑');
@@ -1009,49 +1080,14 @@ client.on('interactionCreate', async interaction => {
         if (customId.startsWith('close_custom_ticket_')) {
             const targetRoleId = customId.replace('close_custom_ticket_', '');
             const member = interaction.member;
-            const topic = interaction.channel.topic || '';
             
-            const creatorId = topic.includes('creator_id:') ? topic.split('creator_id:')[1].split(';')[0] : null;
-            const claimerId = topic.includes('claimed_by:') ? topic.split('claimed_by:')[1].split(';')[0] : null;
-            const claimerName = topic.includes('claimer_name:') ? topic.split('claimer_name:')[1].split(';')[0] : 'مشرف الدعم';
-
-            const isClaimer = topic.includes(`claimed_by:${member.id}`);
-            const hasSupportRole = member.roles.cache.has(targetRoleId);
-            const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
-
-            if (!isClaimer && !hasSupportRole && !isAdmin) {
-                return interaction.reply({ content: '❌ لا يمكنك إغلاق التذكرة، الإغلاق متاح فقط لمن استلمها أو الرتبة المخصصة للقسم.', flags: MessageFlags.Ephemeral });
+            const isAuthorizedToClose = member.permissions.has(PermissionFlagsBits.Administrator) || member.roles.cache.has(targetRoleId);
+            
+            if (!isAuthorizedToClose) {
+                return interaction.reply({ content: '❌ لا يمكنك إغلاق التذكرة، الإغلاق متاح فقط للمشرف المستلم أو الإدارة العليا.', flags: MessageFlags.Ephemeral });
             }
 
-            await interaction.reply({ content: '⚠️ جاري إرسال التقييم للعضو وحذف التذكرة خلال 5 ثوانٍ...' });
-
-            await sendTicketLog(interaction.guild, interaction.channel.name, creatorId, claimerId, member);
-
-            const creatorUser = await interaction.guild.members.fetch(creatorId).catch(() => null);
-            if (creatorUser) {
-                const ratingEmbed = new EmbedBuilder()
-                    .setTitle('⭐ تقييم مستوى الدعم الفني')
-                    .setDescription(`لقد تم إغلاق تذكرتك في سيرفر **${interaction.guild.name}**.\nيرجى الضغط على أحد الأزرار أدناه لتقييم أداء المشرف المتابع معك (**${claimerName}**):`)
-                    .setColor('#f1c40f');
-
-                const starsRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`rate_1_${claimerName}`).setLabel('⭐').setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId(`rate_2_${claimerName}`).setLabel('⭐⭐').setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId(`rate_3_${claimerName}`).setLabel('⭐⭐⭐').setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId(`rate_4_${claimerName}`).setLabel('⭐⭐⭐⭐').setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId(`rate_5_${claimerName}`).setLabel('⭐⭐⭐⭐⭐').setStyle(ButtonStyle.Secondary)
-                );
-
-                await creatorUser.send({ embeds: [ratingEmbed], components: [starsRow] }).catch(() => {});
-            }
-
-            setTimeout(async () => {
-                try {
-                    await interaction.channel.delete();
-                } catch (err) {
-                    console.error('Error deleting channel:', err);
-                }
-            }, 5000);
+            await executeTicketClose(interaction.channel, member);
         }
 
         // تسجيل التقييم في قناة اللوج فور ضغط العضو عليه بالخاص
