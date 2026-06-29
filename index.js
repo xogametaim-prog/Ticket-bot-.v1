@@ -48,18 +48,18 @@ let liveCounterMessageId = null;
 let liveCounterChannelId = null; 
 let logVerifyChannelId = null; 
 
-// لتخزين القناة والرسالة لعداد -lca الجديد لجميع الأعضاء (قديم + جديد)
 let lcaMessageId = null;
 let lcaChannelId = null;
 
+// متغير لحفظ رابط التحقق الفوري المرسل عند الدخول -vj
+let autoJoinVerifyUrl = ''; 
+
 app.get('/', (req, res) => res.send('OAuth2 Verify & Broadcast Bot is Running!'));
 
-// دالة تفاعلية مساعدة لتحديث عدادات الـ Live الإحصائية تلقائياً فوراً وصامتاً
 async function updateAllLiveCounters() {
     try {
         const totalCount = await VerifiedUser.countDocuments();
 
-        // 1. تحديث عداد -lc الافتراضي
         if (liveCounterChannelId && liveCounterMessageId) {
             const counterChannel = client.channels.cache.get(liveCounterChannelId);
             if (counterChannel) {
@@ -75,7 +75,6 @@ async function updateAllLiveCounters() {
             }
         }
 
-        // 2. تحديث عداد -lca الشامل الجديد (قديم + جديد)
         if (lcaChannelId && lcaMessageId) {
             const counterChannel = client.channels.cache.get(lcaChannelId);
             if (counterChannel) {
@@ -129,7 +128,6 @@ app.get('/callback', async (req, res) => {
             { upsert: true, new: true }
         );
 
-        // إرسال اللوج المخصص في الروم المحددة (-tv)
         if (logVerifyChannelId) {
             const logChannel = client.channels.cache.get(logVerifyChannelId);
             if (logChannel) {
@@ -146,7 +144,6 @@ app.get('/callback', async (req, res) => {
             }
         }
 
-        // استدعاء دالة تحديث العدادات تلقائياً وصامتاً بالثانية
         await updateAllLiveCounters();
 
         if (guildId) {
@@ -182,22 +179,53 @@ const client = new Client({
 });
 
 // الاختصارات والأوامر الأساسية الحالية
-const VERIFY_SETUP_PREFIX = '-vr';    // إرسال بوكس التحقق بالسؤال عن الرابط
-const COUNT_VERIFY_PREFIX = '-vf';    // فحص عدد الموافقين الإجمالي
-const PULL_MEMBERS_PREFIX = '-pull';  // سحب وإدخال الأعضاء للسيرفر المحدد
-const LOG_VERIFY_PREFIX = '-tv';      // تحديد روم لوج التحقق الجديد
-const LIVE_COUNTER_PREFIX = '-lc';    // إعداد وتفعيل عداد التحقق المباشر
+const VERIFY_SETUP_PREFIX = '-vr';    
+const COUNT_VERIFY_PREFIX = '-vf';    
+const PULL_MEMBERS_PREFIX = '-pull';  
+const LOG_VERIFY_PREFIX = '-tv';      
+const LIVE_COUNTER_PREFIX = '-lc';    
 
-const DM_BROADCAST_PREFIX = '-t';      // برودكاست الرسائل الخاصة العامة
-const DM_VERIFY_PREFIX = '-vt';         // برودكاست رابط التحقق بالمنشن تلقائياً (أونلاين ثم أوفلاين)
-
-// ميزة العداد الشامل الجديد للأعضاء (قديم + جديد)
+const DM_BROADCAST_PREFIX = '-t';      
+const DM_VERIFY_PREFIX = '-vt';         
 const UNIVERSAL_COUNTER_PREFIX = '-lca'; 
+
+// ميزة الترحيب الفوري بالرابط للخاص -vj
+const AUTO_DM_VERIFY_PREFIX = '-vj';
 
 let verifyUrl = 'https://discord.com/api/oauth2/authorize...'; 
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
+
+// ميزة الإرسال التلقائي والترحيبي بالرابط للخاص فور دخول العضو (-vj)
+client.on('guildMemberAdd', async member => {
+    if (member.user.bot) return;
+
+    if (autoJoinVerifyUrl && autoJoinVerifyUrl.startsWith('http')) {
+        const embed = new EmbedBuilder()
+            .setTitle('🛡️ Server Verification / التحقق الذاتي')
+            .setDescription(`👋 مرحباً بك يا ${member} في سيرفرنا الرائع!\n\nيرجى الضغط على الزر أدناه لإتمام التحقق وتفعيل حسابك بالكامل بداخل السيرفر والحصول على رتبة **Verified** لفتح الرومات مباشرة.`)
+            .setColor('#2b2d31')
+            .setTimestamp();
+
+        // تمرير معرف السيرفر ديناميكياً لتفعيل الرتب تلقائياً للعضو
+        const finalUrl = `${autoJoinVerifyUrl}&state=${member.guild.id}`;
+
+        const verifyButton = new ButtonBuilder()
+            .setLabel('Verify yourself')
+            .setURL(finalUrl)
+            .setStyle(ButtonStyle.Link)
+            .setEmoji('✅');
+
+        const row = new ActionRowBuilder().addComponents(verifyButton);
+
+        try {
+            await member.send({ embeds: [embed], components: [row] });
+        } catch (err) {
+            // تجاهل الخطأ في حال كان العضو يغلق الرسائل الخاصة لديه
+        }
+    }
+});
 
 async function createVerifyRoles(guild) {
     try {
@@ -241,7 +269,7 @@ client.on('messageCreate', async message => {
     const content = message.content.trim();
     const isAuthorized = message.member.permissions.has(PermissionFlagsBits.Administrator) || message.member.roles.cache.some(r => r.name === 'Ownerv');
 
-    // 1. الإعداد التفاعلي لبوكس التحقق والزر بالسؤال عن الرابط
+    // الإعداد التفاعلي لبوكس التحقق والزر بالسؤال عن الرابط
     if (content === VERIFY_SETUP_PREFIX) {
         if (!isAuthorized) {
             return message.reply('❌ عذراً، هذا الأمر مخصص للإدارة أو أصحاب رتبة **Ownerv** فقط.');
@@ -297,7 +325,20 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 2. تعيين قناة لوج التحقق (-tv [#القناة])
+    // تعيين الرابط التلقائي للإرسال للخاص فور دخول الأعضاء الجدد (-vj [رابط التحقق])
+    if (content.startsWith(AUTO_DM_VERIFY_PREFIX)) {
+        if (!isAuthorized) return;
+        const newUrl = content.replace(AUTO_DM_VERIFY_PREFIX, '').trim();
+        if (!newUrl || !newUrl.startsWith('http')) {
+            return message.reply('❌ يرجى وضع رابط الـ OAuth2 الصحيح للتحقق (مثال: `-vj https://discord.com/...`):');
+        }
+        autoJoinVerifyUrl = newUrl;
+        await message.reply('✅ **تم بنجاح حفظ وتفعيل ميزة الإرسال التلقائي للرابط للخاص فور دخول الأعضاء الجدد!**');
+        await message.delete().catch(() => {});
+        return;
+    }
+
+    // تعيين قناة لوج التحقق (-tv [#القناة])
     if (content.startsWith(LOG_VERIFY_PREFIX)) {
         if (!isAuthorized) return;
 
@@ -317,7 +358,7 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // 3. تفعيل الـ Live Counter (عداد التحقق الحي)
+    // تفعيل الـ Live Counter (عداد التحقق الحي)
     if (content === LIVE_COUNTER_PREFIX) {
         if (!isAuthorized) return;
 
@@ -341,7 +382,7 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // تفعيل العداد الشامل الجديد لجميع الأعضاء (قديم + جديد) -lca
+    // تفعيل العداد الشامل لجميع الأعضاء (قديم + جديد) -lca
     if (content === UNIVERSAL_COUNTER_PREFIX) {
         if (!isAuthorized) return;
 
@@ -357,7 +398,7 @@ client.on('messageCreate', async message => {
             lcaMessageId = sentMessage.id;
             lcaChannelId = message.channel.id;
 
-            await message.reply('✅ **تم بنجاح تفعيل العداد الشامل في هذه القناة! سيقوم البوت بقراءة كامل قاعدة البيانات السحابية وتحديث الإحصائية الكلية تلقائياً.**');
+            await message.reply('✅ **تم بنجاح تفعيل العداد الشامل في هذه القناة!**');
             await message.delete().catch(() => {});
         } catch (err) {
             console.error(err);
@@ -365,7 +406,7 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // 4. فحص عدد الموثقين الإجمالي
+    // فحص عدد الموثقين الإجمالي
     if (content === COUNT_VERIFY_PREFIX) {
         if (!isAuthorized) return;
         try {
@@ -378,7 +419,7 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // 5. سحب الأعضاء الموثقين وتلقائياً (-pull [أيدي السيرفر])
+    // سحب الأعضاء الموثقين وتلقائياً (-pull [أيدي السيرفر])
     if (content.startsWith(PULL_MEMBERS_PREFIX)) {
         if (!isAuthorized) return;
 
@@ -445,7 +486,6 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // 6. برودكاست الرسائل الخاصة العامة بالمنشن التلقائي (أونلاين أولاً ثم أوفلاين) - الاختصار -t
     if (content === DM_BROADCAST_PREFIX) {
         if (!isAuthorized) return;
 
