@@ -48,7 +48,52 @@ let liveCounterMessageId = null;
 let liveCounterChannelId = null; 
 let logVerifyChannelId = null; 
 
+// لتخزين القناة والرسالة لعداد -lca الجديد لجميع الأعضاء (قديم + جديد)
+let lcaMessageId = null;
+let lcaChannelId = null;
+
 app.get('/', (req, res) => res.send('OAuth2 Verify & Broadcast Bot is Running!'));
+
+// دالة تفاعلية مساعدة لتحديث عدادات الـ Live الإحصائية تلقائياً فوراً وصامتاً
+async function updateAllLiveCounters() {
+    try {
+        const totalCount = await VerifiedUser.countDocuments();
+
+        // 1. تحديث عداد -lc الافتراضي
+        if (liveCounterChannelId && liveCounterMessageId) {
+            const counterChannel = client.channels.cache.get(liveCounterChannelId);
+            if (counterChannel) {
+                const counterMessage = await counterChannel.messages.fetch(liveCounterMessageId).catch(() => null);
+                if (counterMessage) {
+                    const updatedEmbed = new EmbedBuilder()
+                        .setTitle('📊 عداد التحقق المباشر | Live Counter')
+                        .setDescription(`🟢 تم تحديث العداد تلقائياً وبشكل حي!\n\n👥 العدد الإجمالي للأعضاء الموثقين والجاهزين للسحب في السيرفر هو:\n🌟 **\`${totalCount}\` عضو مفعّل** 🌟`)
+                        .setColor('#2ecc71')
+                        .setTimestamp();
+                    await counterMessage.edit({ embeds: [updatedEmbed] }).catch(() => {});
+                }
+            }
+        }
+
+        // 2. تحديث عداد -lca الشامل الجديد (قديم + جديد)
+        if (lcaChannelId && lcaMessageId) {
+            const counterChannel = client.channels.cache.get(lcaChannelId);
+            if (counterChannel) {
+                const counterMessage = await counterChannel.messages.fetch(lcaMessageId).catch(() => null);
+                if (counterMessage) {
+                    const updatedEmbed = new EmbedBuilder()
+                        .setTitle('📈 عداد التوثيق الشامل | Universal Counter')
+                        .setDescription(`🟢 تم التحديث التلقائي بشكل حي من قاعدة البيانات!\n\n📋 **إحصائية الأعضاء الكلية (قدامى + جدد):**\n🌟 إجمالي عدد الحسابات الموثقة داخل الرابط حالياً هو: **\`${totalCount}\` عضو** 🌟`)
+                        .setColor('#3498db')
+                        .setTimestamp();
+                    await counterMessage.edit({ embeds: [updatedEmbed] }).catch(() => {});
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Error updating counters:', e);
+    }
+}
 
 app.get('/callback', async (req, res) => {
     const code = req.query.code;
@@ -84,6 +129,7 @@ app.get('/callback', async (req, res) => {
             { upsert: true, new: true }
         );
 
+        // إرسال اللوج المخصص في الروم المحددة (-tv)
         if (logVerifyChannelId) {
             const logChannel = client.channels.cache.get(logVerifyChannelId);
             if (logChannel) {
@@ -100,21 +146,8 @@ app.get('/callback', async (req, res) => {
             }
         }
 
-        if (liveCounterChannelId && liveCounterMessageId) {
-            const counterChannel = client.channels.cache.get(liveCounterChannelId);
-            if (counterChannel) {
-                const totalCount = await VerifiedUser.countDocuments();
-                const counterMessage = await counterChannel.messages.fetch(liveCounterMessageId).catch(() => null);
-                if (counterMessage) {
-                    const updatedEmbed = new EmbedBuilder()
-                        .setTitle('📊 عداد التحقق المباشر | Live Counter')
-                        .setDescription(`🟢 تم تحديث العداد تلقائياً وبشكل حي!\n\n👥 العدد الإجمالي للأعضاء الموثقين والجاهزين للسحب في السيرفر هو:\n🌟 **\`${totalCount}\` عضو مفعّل** 🌟`)
-                        .setColor('#2ecc71')
-                        .setTimestamp();
-                    await counterMessage.edit({ embeds: [updatedEmbed] }).catch(() => {});
-                }
-            }
-        }
+        // استدعاء دالة تحديث العدادات تلقائياً وصامتاً بالثانية
+        await updateAllLiveCounters();
 
         if (guildId) {
             const guild = client.guilds.cache.get(guildId);
@@ -158,6 +191,9 @@ const LIVE_COUNTER_PREFIX = '-lc';    // إعداد وتفعيل عداد الت
 const DM_BROADCAST_PREFIX = '-t';      // برودكاست الرسائل الخاصة العامة
 const DM_VERIFY_PREFIX = '-vt';         // برودكاست رابط التحقق بالمنشن تلقائياً (أونلاين ثم أوفلاين)
 
+// ميزة العداد الشامل الجديد للأعضاء (قديم + جديد)
+const UNIVERSAL_COUNTER_PREFIX = '-lca'; 
+
 let verifyUrl = 'https://discord.com/api/oauth2/authorize...'; 
 
 const TOKEN = process.env.TOKEN;
@@ -188,7 +224,6 @@ async function createVerifyRoles(guild) {
     }
 }
 
-// استخدام الحدث الرسمي الجديد لتفادي التعارض البرمجي
 client.once(Events.ClientReady, async () => {
     console.log(`Verify & Broadcast Bot is Online as ${client.user.tag}`);
     client.guilds.cache.forEach(async (guild) => {
@@ -299,6 +334,30 @@ client.on('messageCreate', async message => {
             liveCounterChannelId = message.channel.id;
 
             await message.reply('✅ **تم بنجاح تفعيل عداد التحقق المباشر في هذه القناة!**');
+            await message.delete().catch(() => {});
+        } catch (err) {
+            console.error(err);
+        }
+        return;
+    }
+
+    // تفعيل العداد الشامل الجديد لجميع الأعضاء (قديم + جديد) -lca
+    if (content === UNIVERSAL_COUNTER_PREFIX) {
+        if (!isAuthorized) return;
+
+        try {
+            const totalCount = await VerifiedUser.countDocuments();
+            const lcaEmbed = new EmbedBuilder()
+                .setTitle('📈 عداد التوثيق الشامل | Universal Counter')
+                .setDescription(`🟢 جاري بدء المراقبة وجلب الإحصائيات الكلية للرابط...\n\n📋 **إحصائية الأعضاء الكلية (قدامى + جدد):**\n🌟 إجمالي عدد الحسابات الموثقة داخل الرابط حالياً هو: **\`${totalCount}\` عضو** 🌟`)
+                .setColor('#3498db')
+                .setTimestamp();
+
+            const sentMessage = await message.channel.send({ embeds: [lcaEmbed] });
+            lcaMessageId = sentMessage.id;
+            lcaChannelId = message.channel.id;
+
+            await message.reply('✅ **تم بنجاح تفعيل العداد الشامل في هذه القناة! سيقوم البوت بقراءة كامل قاعدة البيانات السحابية وتحديث الإحصائية الكلية تلقائياً.**');
             await message.delete().catch(() => {});
         } catch (err) {
             console.error(err);
