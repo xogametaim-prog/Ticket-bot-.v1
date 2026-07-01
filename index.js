@@ -23,7 +23,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// ==================== إعداد وتوصيل قاعدة بيانات MongoDB ====================
+// ==================== إعداد وتوصيل قاعدة بيانات MongoDB السحابية ====================
 const MONGO_URI = process.env.MONGO_URI; 
 
 mongoose.connect(MONGO_URI)
@@ -39,6 +39,7 @@ const UserSchema = new mongoose.Schema({
 
 const VerifiedUser = mongoose.model('VerifiedUser', UserSchema);
 
+// جدول لحفظ بيانات كوينز الأعضاء وحسابات البنك بداخل الداتابيس السحابية
 const EconomySchema = new mongoose.Schema({
     userId: { type: String, required: true, unique: true },
     coins: { type: Number, default: 0 },
@@ -47,7 +48,18 @@ const EconomySchema = new mongoose.Schema({
 const Economy = mongoose.model('Economy', EconomySchema);
 // ====================================================================
 
+// تعريف كائن البوت أولاً لضمان سلامة الترتيب البرمجي وتفادي التوقف
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
+    ]
+});
+
 const tempSetup = new Map(); 
+const nitroSetup = new Map();
 
 let liveCounterMessageId = null; 
 let liveCounterChannelId = null; 
@@ -135,15 +147,6 @@ app.get('/callback', async (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Server connected`));
-
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
-    ]
-});
 
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
