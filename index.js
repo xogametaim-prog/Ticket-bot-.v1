@@ -7,10 +7,11 @@ const {
     EmbedBuilder, 
     ButtonBuilder, 
     ButtonStyle, 
-    PermissionFlagsBits,
-    ChannelType,
     REST,
     Routes,
+    PermissionFlagsBits,
+    Events,
+    ChannelType,
     MessageFlags
 } = require('discord.js');
 const express = require('express');
@@ -31,18 +32,23 @@ const client = new Client({
     ]
 });
 
-// الاختصارات والأوامر الأساسية
-const TICKET_SETUP_PREFIX = '-st'; 
-const DM_BROADCAST_PREFIX = '-t';   
+// الأوامر الأساسية محدثة بالكامل بالبريفكس الإيجابي (+) بناءً على طلبك
+const TICKET_SETUP_PREFIX = '+st'; 
+const DM_BROADCAST_PREFIX = '+t';   
 const WELCOME_SETUP_PREFIX = '+wel';
 const BYE_SETUP_PREFIX = '+Bye';
+const EMBED_MESSAGE_SETUP_PREFIX = '+em'; // الاختصار المطور للمنشورات
 
 const tempSetup = new Map();
 const dmSetup = new Map();
 
-// لتخزين القنوات المحددة للترحيب والمغادرة (تدعم أكثر من روم)
+// لتخزين القنوات المحددة للترحيب والمغادرة وقنوات الإمبد التفاعلية المتعددة
 const welcomeChannels = new Set();
 const byeChannels = new Set();
+const embedTargetChannelIds = new Set(); // تم تحويلها إلى Set لدعم التفعيل في أكثر من روم بآن واحد
+
+// الصورة الفخمة المطلوب إرفاقها تلقائياً أسفل منشورات الإمبد
+const EMBED_FOOTER_IMAGE_URL = 'https://cdn.discordapp.com/attachments/1521977140227211477/1521980487764148435/lv_0_.png?ex=6a46ce49&is=6a457cc9&hm=a629b2a4de8b6b23f5bc18eed10214224000ad8ac7ecd930ef81191177f81363&';
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -60,7 +66,6 @@ async function generateGoldCard(member, title, subtitle, countText) {
     ctx.fillStyle = '#141414';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // تدرج لوني ذهبي فخم للحواف والإطارات والمستطيلات
     const goldGrad = ctx.createLinearGradient(0, 0, 700, 250);
     goldGrad.addColorStop(0, '#bf953f');
     goldGrad.addColorStop(0.25, '#fcf6ba');
@@ -72,7 +77,6 @@ async function generateGoldCard(member, title, subtitle, countText) {
     ctx.lineWidth = 8;
     ctx.strokeRect(5, 5, canvas.width - 10, canvas.height - 10);
 
-    // كتابة النصوص بالذهب
     ctx.fillStyle = goldGrad;
     ctx.font = 'bold 36px Arial';
     ctx.fillText(title, 250, 95);
@@ -89,7 +93,6 @@ async function generateGoldCard(member, title, subtitle, countText) {
     ctx.font = 'bold 18px Arial';
     ctx.fillText(countText, 250, 215);
 
-    // رسم صورة العضو الدائرية بإطار ذهبي رائع
     try {
         const avatarUrl = member.user.displayAvatarURL({ extension: 'png', size: 256 });
         const avatarImage = await loadImage(avatarUrl);
@@ -102,7 +105,6 @@ async function generateGoldCard(member, title, subtitle, countText) {
         ctx.drawImage(avatarImage, 61, 61, 128, 128);
         ctx.restore();
 
-        // إطار ذهبي دائري حول الصورة
         ctx.strokeStyle = goldGrad;
         ctx.lineWidth = 4;
         ctx.beginPath();
@@ -166,7 +168,47 @@ client.on('messageCreate', async message => {
     const content = message.content.trim();
     const isOwner = message.member.permissions.has(PermissionFlagsBits.Administrator) || message.member.roles.cache.some(r => r.name === 'Ownerv');
 
-    // 1. إعداد قنوات الترحيب المتعددة (+wel)
+    // ==================== ميزة الـ Auto-Embed التفاعلية للروم المخصصة المتعددة ====================
+    if (embedTargetChannelIds.has(message.channel.id)) {
+        try {
+            const userMessageText = message.content;
+
+            // مسح وحذف رسالة العضو الأصلية فوراً للمحافظة على تنسيق ومظهر الروم
+            await message.delete().catch(() => {});
+
+            // إرسال منشن ورسالة شكر العضو
+            await message.channel.send(`💖 شكراً لك يا ${message.author} على مشاركتك الممتازة في القناة!`);
+
+            // صياغة المنشور التفاعلي بداخل إمبد ملوّن وجميل باسم وصورة العضو وإرفاق الصورة المحددة
+            const embed = new EmbedBuilder()
+                .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL({ dynamic: true }) })
+                .setDescription(userMessageText || 'مشاركة فنية')
+                .setColor('#bf953f') // اللون الذهبي
+                .setImage(EMBED_FOOTER_IMAGE_URL) // إرفاق الصورة الفخمة تلقائياً أسفل الإمبد
+                .setTimestamp();
+
+            await message.channel.send({ embeds: [embed] });
+        } catch (err) {
+            console.error('Error on Auto-Embed execution:', err);
+        }
+        return;
+    }
+    // =========================================================================================
+
+    // 1. إعداد وتحديد روم إمبد تفاعلي إضافي (+em [#روم-المنشورات])
+    if (content.startsWith(EMBED_MESSAGE_SETUP_PREFIX)) {
+        if (!isOwner) return;
+        const channelMention = message.mentions.channels.first();
+        if (!channelMention) return message.reply('❌ يرجى منشن روم المنشورات المخصص لتفعيله (مثال: `+em #روم-الصور`):');
+
+        // إضافة أيدي الروم الجديد إلى مجموعة الرومات المخصصة
+        embedTargetChannelIds.add(channelMention.id);
+        await message.reply(`✅ **تم بنجاح إضافة قناة المنشورات التلقائية المخصصة: ${channelMention} (العدد الحالي: \`${embedTargetChannelIds.size}\` رومات)**\nأي رسالة كُتبت بداخلها سيتم صياغتها تلقائياً في إمبد مدمج بالصورة الذهبية.`);
+        await message.delete().catch(() => {});
+        return;
+    }
+
+    // 2. إعداد قنوات الترحيب المتعددة (+wel)
     if (content.startsWith(WELCOME_SETUP_PREFIX)) {
         if (!isOwner) return;
         const channelMention = message.mentions.channels.first();
@@ -178,7 +220,7 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // 2. إعداد قنوات المغادرة المتعددة (+Bye)
+    // 3. إعداد قنوات المغادرة المتعددة (+Bye)
     if (content.startsWith(BYE_SETUP_PREFIX)) {
         if (!isOwner) return;
         const channelMention = message.mentions.channels.first();
@@ -190,7 +232,7 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // 3. الإعداد التفاعلي لبوكس التذاكر بالسؤال والمسح (-st)
+    // 4. الإعداد التفاعلي لبوكس التذاكر بالسؤال والمسح (+st)
     if (content === TICKET_SETUP_PREFIX) {
         if (!isOwner) return;
 
@@ -268,7 +310,7 @@ client.on('messageCreate', async message => {
         }
     }
 
-    // 4. البرودكاست الخاص فائق السرعة والآمن بالمنشن (متصل أولاً ثم أوفلاين) -t
+    // 5. البرودكاست الخاص فائق السرعة والآمن بالمنشن (متصل أولاً ثم أوفلاين) (+t)
     if (content === DM_BROADCAST_PREFIX) {
         if (!isOwner) return;
 
